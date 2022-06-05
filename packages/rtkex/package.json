@@ -1,0 +1,53 @@
+{
+  "name": "rtkex",
+  "version": "0.0.0",
+  "description": "A Redux Toolkit Extension",
+  "author": "linq2js <linqtojs@gmail.com>",
+  "repository": {
+    "url": "https://github.com/linq2js/rtkex"
+  },
+  "homepage": "https://linq2js.github.io/rtkex/",
+  "license": "ISC",
+  "scripts": {
+    "prepublishOnly": "yarn test && yarn && yarn build",
+    "lint": "eslint lib/ --ext .js,.jsx,.ts,.tsx",
+    "test": "vitest run",
+    "clean": "rm -rf dist build package",
+    "ts-node": "ts-node",
+    "build": "rimraf dist && tsc"
+  },
+  "main": "dist/tsc/main.js",
+  "types": "dist/tsc/main.d.ts",
+  "directories": {
+    "lib": "lib"
+  },
+  "files": [
+    "lib",
+    "dist/tsc"
+  ],
+  "keywords": [
+    "react",
+    "react-redux",
+    "redux",
+    "starter",
+    "toolkit",
+    "reducer",
+    "slice",
+    "immer",
+    "immutable",
+    "redux-toolkit"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "react": "^18.1.0",
+    "react-dom": "^18.1.0",
+    "@types/react": "^18.0.11",
+    "@types/react-dom": "^18.0.5",
+    "@reduxjs/toolkit": "^1.8.2",
+    "@testing-library/react-hooks": "^8.0.0",
+    "node-fetch": "^3.2.3",
+    "react-redux": "^8.0.2"
+  },
+  "peerDependencies": {},
+  "peerDependenciesMeta": {}
+}
