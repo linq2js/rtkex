@@ -7,13 +7,13 @@ A Redux Toolkit Extension
 **with NPM**
 
 ```bash
-npm i apiiz --save
+npm i rtkex --save
 ```
 
 **with YARN**
 
 ```bash
-yarn add apiiz
+yarn add rtkex
 ```
 
 ## Usages
