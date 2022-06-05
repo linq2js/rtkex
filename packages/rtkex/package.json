@@ -1,6 +1,6 @@
 {
   "name": "rtkex",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "A Redux Toolkit Extension",
   "author": "linq2js <linqtojs@gmail.com>",
   "repository": {
@@ -37,17 +37,15 @@
     "immutable",
     "redux-toolkit"
   ],
-  "dependencies": {},
   "devDependencies": {
-    "react": "^18.1.0",
-    "react-dom": "^18.1.0",
-    "@types/react": "^18.0.11",
-    "@types/react-dom": "^18.0.5",
     "@reduxjs/toolkit": "^1.8.2",
     "@testing-library/react-hooks": "^8.0.0",
+    "@types/react": "^18.0.11",
+    "@types/react-dom": "^18.0.5",
     "node-fetch": "^3.2.3",
+    "react": "^18.1.0",
+    "react-dom": "^18.1.0",
     "react-redux": "^8.0.2"
   },
-  "peerDependencies": {},
   "peerDependenciesMeta": {}
 }
