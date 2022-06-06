@@ -43,8 +43,8 @@ const sumSelector = combineSelectors(
 // create store with enhanced slices
 const store = configureStore({
   reducer: {
-    ...ASlice.reducerProps,
-    ...BSlice.reducerProps,
+    ...ASlice.reducerProps(),
+    ...BSlice.reducerProps(),
   },
 });
 

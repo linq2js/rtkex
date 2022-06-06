@@ -20,7 +20,7 @@ test("createSlice", () => {
   const slice = createSlice("counter", 1, { increment: (state) => state + 1 });
   const store = configureStore({
     reducer: {
-      ...slice.reducerProps,
+      ...slice.reducerProps(),
     },
   });
   const { result } = renderHook(

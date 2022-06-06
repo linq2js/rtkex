@@ -1,6 +1,8 @@
 import {
+  AnyAction,
   createSlice as createSliceOriginal,
   CreateSliceOptions,
+  Reducer,
   Slice,
   SliceCaseReducers,
 } from "@reduxjs/toolkit";
@@ -12,7 +14,18 @@ export type EnhancedSlice<
   TName extends string = string
 > = Slice<TState, TCaseReducers, TName> & {
   selector: (state: { [key in TName]: TState }) => TState;
-  reducerProps: {
+  reducerProps<TNewState, TNewAction extends AnyAction>(
+    highOrderReducer: (
+      reducer: Reducer<TState, AnyAction>
+    ) => Reducer<TNewState, TNewAction>
+  ): {
+    [key in TName]: Slice<
+      TNewState,
+      SliceCaseReducers<TNewState>,
+      TName
+    >["reducer"];
+  };
+  reducerProps(): {
     [key in TName]: Slice<TState, TCaseReducers, TName>["reducer"];
   };
 };
@@ -90,7 +103,12 @@ export const enhanceSlice = <
   return {
     ...slice,
     selector: (state) => state[slice.name],
-    reducerProps: { [slice.name]: slice.reducer } as any,
+    reducerProps(highOrderReducer?: Function) {
+      if (highOrderReducer) {
+        return { [slice.name]: highOrderReducer(slice.reducer) } as any;
+      }
+      return { [slice.name]: slice.reducer } as any;
+    },
   };
 };
 
