@@ -19,8 +19,12 @@ yarn add rtkex
 ## Usages
 
 ```js
-import { configureStore } from "@reduxjs/toolkit";
-import { createSlice, combineSelectors, useSelector } from "rtkex";
+import {
+  configureStore,
+  createSlice,
+  combineSelectors,
+  useSelector,
+} from "rtkex";
 
 const counterSlice = createSlice("counter", 1, {
   increment: (state) => state + 1,
@@ -41,12 +45,9 @@ const sumSelector = combineSelectors(
 );
 
 // create store with enhanced slices
-const store = configureStore({
-  reducer: {
-    ...ASlice.reducerProps(),
-    ...BSlice.reducerProps(),
-  },
-});
+const store = configureStore((builder) =>
+  builder.addSlice(ASlice).addSlice(BSlice)
+);
 
 // using slice's selector to retrieve count state
 const count = useSelector(counterSlice.selector);

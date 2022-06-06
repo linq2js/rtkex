@@ -1,9 +1,9 @@
-import { configureStore } from "@reduxjs/toolkit";
 import { PropsWithChildren } from "react";
 import { Provider, useDispatch } from "react-redux";
 import { AnyAction, Store } from "redux";
-import { createSlice, useSelector } from "./main";
+import { createSlice, useSelector, configureStore } from "./main";
 import { renderHook } from "@testing-library/react-hooks";
+import undoable from "redux-undo";
 
 function createWrapper<T, A extends AnyAction>(store: Store<T, A>) {
   return (props: PropsWithChildren<void>) => (
@@ -17,12 +17,12 @@ test("noop", () => {
 });
 
 test("createSlice", () => {
-  const slice = createSlice("counter", 1, { increment: (state) => state + 1 });
-  const store = configureStore({
-    reducer: {
-      ...slice.reducerProps(),
-    },
-  });
+  const slice = createSlice("counter", 1, {
+    increment: (state) => state + 1,
+  }).wrap(undoable);
+
+  const store = configureStore((builder) => builder.addSlice(slice));
+
   const { result } = renderHook(
     () => {
       const dispatch = useDispatch();
@@ -34,7 +34,7 @@ test("createSlice", () => {
     { wrapper: createWrapper(store) }
   );
 
-  expect(result.current.count).toBe(1);
+  expect(result.current.count.present).toBe(1);
   result.current.increment();
-  expect(result.current.count).toBe(2);
+  expect(result.current.count.present).toBe(2);
 });

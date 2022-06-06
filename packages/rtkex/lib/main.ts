@@ -1,34 +1,48 @@
 import {
   AnyAction,
   createSlice as createSliceOriginal,
+  configureStore as configureStoreOriginal,
   CreateSliceOptions,
+  Middleware,
   Reducer,
   Slice,
   SliceCaseReducers,
+  Store,
+  StoreEnhancer,
+  combineReducers,
 } from "@reduxjs/toolkit";
-import { EqualityFn, useSelector as selectorHook } from "react-redux";
+import { useState } from "react";
+import { EqualityFn, useSelector as selectorHook, useStore } from "react-redux";
 
-export type EnhancedSlice<
+export type Selector<TName extends string, TState> = (state: {
+  [key in TName]: TState;
+}) => TState;
+
+export interface WrappedSlice<TName, TState, TActions, TSelector> {
+  name: TName;
+  getInitialState(): TState | undefined;
+  actions: TActions;
+  selector: TSelector;
+  reducer: Reducer<TState>;
+}
+
+export interface EnhancedSlice<
   TState = any,
   TCaseReducers extends SliceCaseReducers<TState> = SliceCaseReducers<TState>,
   TName extends string = string
-> = Slice<TState, TCaseReducers, TName> & {
+> extends Slice<TState, TCaseReducers, TName> {
+  dependencies?: SliceInfo[];
   selector: (state: { [key in TName]: TState }) => TState;
-  reducerProps<TNewState, TNewAction extends AnyAction>(
-    highOrderReducer: (
-      reducer: Reducer<TState, AnyAction>
-    ) => Reducer<TNewState, TNewAction>
-  ): {
-    [key in TName]: Slice<
-      TNewState,
-      SliceCaseReducers<TNewState>,
-      TName
-    >["reducer"];
-  };
-  reducerProps(): {
-    [key in TName]: Slice<TState, TCaseReducers, TName>["reducer"];
-  };
-};
+  wrap<S>(
+    highOrderReducer: (reducer: Reducer<TState>) => Reducer<S>,
+    initialState?: S
+  ): WrappedSlice<
+    TName,
+    S,
+    Slice<TState, TCaseReducers, TName>["actions"],
+    Selector<TName, S>
+  >;
+}
 
 export type ClonableEnhancedSlice<
   TState = any,
@@ -93,25 +107,6 @@ export type UseSelector = {
   ): TSelected;
 };
 
-export const enhanceSlice = <
-  TState = any,
-  TCaseReducers extends SliceCaseReducers<TState> = SliceCaseReducers<TState>,
-  TName extends string = string
->(
-  slice: Slice<TState, TCaseReducers, TName>
-): EnhancedSlice<TState, TCaseReducers, TName> => {
-  return {
-    ...slice,
-    selector: (state) => state[slice.name],
-    reducerProps(highOrderReducer?: Function) {
-      if (highOrderReducer) {
-        return { [slice.name]: highOrderReducer(slice.reducer) } as any;
-      }
-      return { [slice.name]: slice.reducer } as any;
-    },
-  };
-};
-
 /**
  * combine multiple selectors/slice selectors into one selector
  * @param selectors
@@ -153,7 +148,7 @@ export const createSlice = <
   options?: Omit<
     CreateSliceOptions<TState, TCaseReducers, TName>,
     "name" | "initialState" | "reducers"
-  >
+  > & { dependencies?: Slice[] }
 ): ClonableEnhancedSlice<TState, TCaseReducers, TName> => {
   const slice = createSliceOriginal({
     ...options,
@@ -161,11 +156,25 @@ export const createSlice = <
     initialState,
     reducers,
   });
-  return Object.assign(enhanceSlice(slice), {
+  const selector = (state: any) => state[slice.name];
+
+  return {
+    ...slice,
+    selector,
+    wrap(highOrderReducer, initialState) {
+      return {
+        name: slice.name,
+        actions: slice.actions,
+        selector,
+        getInitialState: () => initialState,
+        reducer: highOrderReducer(this.reducer),
+      };
+    },
+    dependencies: options?.dependencies ?? [],
     clone<TNewName extends string>(newName: TNewName) {
       return createSlice(newName, initialState, reducers, options);
     },
-  });
+  };
 };
 
 export const useSelector: UseSelector = (...args: any[]) => {
@@ -173,4 +182,206 @@ export const useSelector: UseSelector = (...args: any[]) => {
     return selectorHook(args[0], args[1]);
   }
   return selectorHook(combineSelectors(args[0], args[1]), args[2]);
+};
+
+export type DynamicBuildCallback = (
+  builder: Pick<StoreBuilder, "addSlice" | "addReducer">
+) => void;
+
+export interface Injector extends Function {
+  (builder: StoreBuilder): void;
+  inject(buildCallback: DynamicBuildCallback): void;
+}
+
+export interface SliceInfo<
+  TName extends string = string,
+  TState = any,
+  TActions = {}
+> {
+  name: TName;
+  reducer: Reducer<TState>;
+  actions: TActions;
+  dependencies?: SliceInfo[];
+}
+
+export interface StoreBuilder<
+  TState = any,
+  TAction extends AnyAction = AnyAction
+> {
+  addSlice<S = any, N extends string = string, A = any>(
+    slice: SliceInfo<N, S, A>
+  ): StoreBuilder<TState & { [key in N]: S }, TAction | { type: keyof A }>;
+
+  addMiddleware(...middleware: Middleware[]): this;
+
+  addReducer<S, A extends AnyAction>(
+    reducer: Reducer<S, A>
+  ): StoreBuilder<TState & S, TAction | A>;
+
+  setPreloadedState<S>(state: S): StoreBuilder<TState & S, TAction>;
+
+  enableDevTools(enabled: boolean): this;
+
+  enableDevTools(options: {}): this;
+
+  addEnhancers(...enhancers: StoreEnhancer[]): this;
+}
+
+export type BuildCallback<
+  TState = any,
+  TAction extends AnyAction = AnyAction
+> = (builder: StoreBuilder<{}, never>) => StoreBuilder<TState, TAction>;
+
+interface InternalStoreBuilder<
+  TState = any,
+  TAction extends AnyAction = AnyAction
+> extends StoreBuilder<TState, TAction> {
+  build(buildCallback: (builder: this) => any, force?: boolean): void;
+}
+
+const createStoreBuilder = (
+  onBuild: (data: {
+    token: any;
+    enhancers: StoreEnhancer[];
+    middleware: Middleware[];
+    reducers: Reducer[];
+    reducerMap: Record<string, Reducer>;
+    preloadedState: any;
+    devTools: any;
+  }) => void
+): InternalStoreBuilder<any, any> => {
+  let token = {};
+  let reducerMap: Record<string, Reducer> = {};
+  let reducers: Reducer[] = [];
+  let middleware: Middleware[] = [];
+  let enhancers: StoreEnhancer[] = [];
+  let devTools: any;
+  let preloadedState: any;
+  let prevToken = token;
+
+  const addSlice = (inputSlice: SliceInfo) => {
+    if (reducerMap[inputSlice.name] !== inputSlice.reducer) {
+      reducerMap = { ...reducerMap, [inputSlice.name]: inputSlice.reducer };
+      token = {};
+      if (inputSlice.dependencies?.length) {
+        inputSlice.dependencies.forEach(addSlice);
+      }
+    }
+  };
+
+  return {
+    build(buildCallback, force) {
+      prevToken = token;
+      buildCallback(this);
+      if (!force && prevToken === token) return;
+      prevToken = token;
+
+      onBuild({
+        token,
+        reducerMap,
+        reducers,
+        middleware,
+        enhancers,
+        preloadedState,
+        devTools,
+      });
+
+      return;
+    },
+    addMiddleware(...inputMiddleware) {
+      const newMiddleware = inputMiddleware.filter(
+        (x) => !middleware.includes(x)
+      );
+      if (newMiddleware.length) {
+        middleware = middleware.concat(newMiddleware);
+        token = {};
+      }
+      return this;
+    },
+    addEnhancers(...input) {
+      const newEnhancers = input.filter((x) => !enhancers.includes(x));
+      if (newEnhancers.length) {
+        enhancers = enhancers.concat(newEnhancers);
+        token = {};
+      }
+      return this;
+    },
+    addSlice(inputSlice) {
+      addSlice(inputSlice);
+      return this;
+    },
+    addReducer(inputReducer: any) {
+      if (!reducers.includes(inputReducer)) {
+        reducers = reducers.concat(inputReducer);
+        token = {};
+      }
+      return this;
+    },
+    enableDevTools(input: any) {
+      devTools = input;
+      return this;
+    },
+    setPreloadedState(state) {
+      if (preloadedState !== state) {
+        preloadedState = state;
+        token = {};
+      }
+      return this;
+    },
+  };
+};
+
+export const useBuilder = (buildCallback: DynamicBuildCallback) => {
+  const store = useStore();
+  useState(() => {
+    const builder = (store as any).builder as InternalStoreBuilder;
+    if (!builder) throw new Error("The current store does not support builder");
+    builder.build(buildCallback);
+  });
+};
+
+export const configureStore = <TState, TAction extends AnyAction>(
+  buildCallback?: BuildCallback<TState, TAction>
+): Store<TState, TAction> => {
+  let store: Store<TState, TAction> | undefined;
+
+  const builder = createStoreBuilder(
+    ({
+      preloadedState,
+      reducerMap,
+      reducers,
+      middleware,
+      enhancers,
+      devTools,
+    }) => {
+      if (Object.keys(reducerMap).length) {
+        reducers.push(combineReducers(reducerMap));
+      }
+      const reducer = (state: TState | undefined, action: TAction) => {
+        for (const r of reducers) {
+          state = r(state, action);
+        }
+        return state as TState;
+      };
+      if (store) {
+        store.replaceReducer(reducer);
+      } else {
+        store = configureStoreOriginal({
+          preloadedState,
+          reducer,
+          devTools,
+          enhancers,
+          middleware,
+        });
+      }
+    }
+  );
+
+  builder.build(buildCallback ?? ((builder) => builder), true);
+
+  if (store) {
+    Object.assign(store, { builder });
+  }
+
+  return store as Store<TState, TAction>;
 };
