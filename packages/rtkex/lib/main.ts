@@ -481,6 +481,7 @@ export type LoadableSlice<
     loaded(): AnyAction;
     failed(): AnyAction;
     loading(): AnyAction;
+    clearError(): AnyAction;
   } & Slice<TState, TCaseReducers, TName>["actions"];
 };
 
@@ -609,6 +610,7 @@ export const createLoadableSlice: CreateLoadableSlice = (
     },
     { ...options }
   );
+  const clearError = createAction(`${name}/clearError`);
 
   const cancel = createAction(`${name}/cancel`, () => {
     lastAbort?.();
@@ -648,19 +650,15 @@ export const createLoadableSlice: CreateLoadableSlice = (
               meta,
             };
           })
+          .addCase(clearError, (state) => createLoadable("idle", state.data))
           .addCase(cancel, (state) => {
             const originalMeta = getOriginal(state.meta);
             if (!state.loading || originalMeta !== meta) return state;
-            return createLoadable(
-              getOriginal(state.data) === initialLoadable.data
-                ? "idle"
-                : "loaded",
-              state.data
-            );
+            return createLoadable("idle", state.data);
           });
         if (dataSlice) {
           builder.addDefaultCase((state, action) => {
-            if (state.loading || state.idle) return state;
+            if (state.loading || state.failed) return state;
             const prevData = getOriginal(state.data);
             const nextData = getOriginal(dataSlice.reducer(state.data, action));
 
@@ -687,6 +685,7 @@ export const createLoadableSlice: CreateLoadableSlice = (
       loading: thunk.pending,
       loaded: thunk.fulfilled,
       failed: thunk.rejected,
+      clearError,
       cancel,
     },
   });
