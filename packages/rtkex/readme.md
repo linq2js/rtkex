@@ -21,8 +21,10 @@ yarn add rtkex
 1. New slice dependency logic
 2. New slice selector logic
 3. New store building logic
-4. Dynamic adding slice / reducer
+4. Support adding slice / reducer dynamically
 5. New useSelector implementation
+6. Support loadable slice
+7. Support suspense and error boundary
 
 ## Usages
 
@@ -114,6 +116,37 @@ const store = configureStore((builder) =>
   // and the utilSlice will be added once
   builder.addSlice(sliceA).addSlice(sliceB)
 );
+```
+
+### Loadable slice
+
+Redux toolkit supports createAsyncThunk but it is complicated to use. RTKex wraps slice and thunk logics into one place, it is loadable slice
+
+```js
+import { createLoadableSlice, configureStore, useSelector } from "rtkex";
+import { userAPI } from "./userAPI";
+
+const userListSlice = createLoadableSlice(
+  "users",
+  async (userId: number, thunkAPI) => {
+    const response = await userAPI.fetchById(userId);
+    return response.data;
+  }
+);
+
+const store = configureStore((builder) => builder.addSlice(userListSlice));
+// load user
+store.dispatch(userListSlice.actions.load(123));
+
+const userList = useSelector(userListSlice);
+
+console.log(userList.data);
+console.log(userList.error);
+console.log(userList.status);
+console.log(userList.isIdle);
+console.log(userList.isLoading);
+console.log(userList.isLoaded);
+console.log(userList.isFailed);
 ```
 
 ## Documentations
