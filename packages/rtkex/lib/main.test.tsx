@@ -22,7 +22,7 @@ test("createSlice", () => {
     increment: (state) => state + 1,
   }).wrap(undoable);
 
-  const store = configureStore((builder) => builder.addSlice(slice));
+  const store = configureStore((builder) => builder.withSlice(slice));
 
   const { result } = renderHook(
     () => {

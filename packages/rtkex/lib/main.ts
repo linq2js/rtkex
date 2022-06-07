@@ -16,7 +16,12 @@ import {
   Dispatch,
   createAction,
   original,
+  ValidateSliceCaseReducers,
+  ActionReducerMapBuilder,
+  CaseReducers,
+  isDraft,
 } from "@reduxjs/toolkit";
+import { NoInfer } from "@reduxjs/toolkit/dist/tsHelpers";
 import { useState } from "react";
 import { EqualityFn, useSelector as selectorHook, useStore } from "react-redux";
 
@@ -45,7 +50,7 @@ export interface EnhancedSlice<
    * a selector that returns state of slice from root state
    * @param state
    */
-  selector: Selector<TName, TState>;
+  select: Selector<TName, TState>;
 
   /**
    * wrap the reducer of the slice with high order reducer
@@ -80,7 +85,7 @@ export type ClonableEnhancedSlice<
 
 export type Combiner<TSelectors, TResult> = (values: {
   [key in keyof TSelectors]: TSelectors[key] extends EnhancedSlice
-    ? ReturnType<TSelectors[key]["selector"]>
+    ? ReturnType<TSelectors[key]["select"]>
     : TSelectors[key] extends (state: any) => infer T
     ? T
     : never;
@@ -189,16 +194,16 @@ export const createSlice = <
     reducers,
   });
 
-  const selector = createSelector((state) => state[slice.name]);
+  const select = createSelector((state) => state[slice.name]);
 
   return {
     ...slice,
-    selector,
+    select: select,
     wrap(highOrderReducer, initialState) {
       return {
         name: slice.name,
         actions: slice.actions,
-        selector,
+        selector: select,
         getInitialState: () => initialState,
         reducer: highOrderReducer(this.reducer),
       };
@@ -225,7 +230,7 @@ export const useSelector: UseSelector = (...args: any[]) => {
 };
 
 export type DynamicBuildCallback = (
-  builder: Pick<StoreBuilder, "addSlice" | "addReducer">
+  builder: Pick<StoreBuilder, "withSlice" | "withReducer">
 ) => void;
 
 export interface Injector extends Function {
@@ -248,23 +253,39 @@ export interface StoreBuilder<
   TState = any,
   TAction extends AnyAction = AnyAction
 > {
-  addSlice<S = any, N extends string = string, A = any>(
+  /**
+   * add slice to the store
+   * @param slice
+   */
+  withSlice<S = any, N extends string = string, A = any>(
     slice: SliceInfo<N, S, A>
   ): StoreBuilder<TState & { [key in N]: S }, TAction | { type: string }>;
 
-  addMiddleware(...middleware: Middleware[]): this;
+  /**
+   * add middleware to the store
+   * @param middleware
+   */
+  withMiddleware(...middleware: Middleware[]): this;
 
-  addReducer<S, A extends AnyAction>(
+  /**
+   * add custom reducer to the store
+   * @param reducer
+   */
+  withReducer<S, A extends AnyAction>(
     reducer: Reducer<S, A>
   ): StoreBuilder<TState & S, TAction | A>;
 
-  setPreloadedState<S>(state: S): StoreBuilder<TState & S, TAction>;
+  /**
+   *
+   * @param state
+   */
+  withPreloadedState<S>(state: S): StoreBuilder<TState & S, TAction>;
 
-  enableDevTools(enabled: boolean): this;
+  withDevTools(enabled: boolean): this;
 
-  enableDevTools(options: {}): this;
+  withDevTools(options: {}): this;
 
-  addEnhancers(...enhancers: StoreEnhancer[]): this;
+  withEnhancers(...enhancers: StoreEnhancer[]): this;
 }
 
 export type BuildCallback<
@@ -328,7 +349,7 @@ const createStoreBuilder = (
 
       return;
     },
-    addMiddleware(...inputMiddleware) {
+    withMiddleware(...inputMiddleware) {
       const newMiddleware = inputMiddleware.filter(
         (x) => !middleware.includes(x)
       );
@@ -338,7 +359,7 @@ const createStoreBuilder = (
       }
       return this;
     },
-    addEnhancers(...input) {
+    withEnhancers(...input) {
       const newEnhancers = input.filter((x) => !enhancers.includes(x));
       if (newEnhancers.length) {
         enhancers = enhancers.concat(newEnhancers);
@@ -346,22 +367,22 @@ const createStoreBuilder = (
       }
       return this;
     },
-    addSlice(inputSlice) {
+    withSlice(inputSlice) {
       addSlice(inputSlice);
       return this;
     },
-    addReducer(inputReducer: any) {
+    withReducer(inputReducer: any) {
       if (!reducers.includes(inputReducer)) {
         reducers = reducers.concat(inputReducer);
         token = {};
       }
       return this;
     },
-    enableDevTools(input: any) {
+    withDevTools(input: any) {
       devTools = input;
       return this;
     },
-    setPreloadedState(state) {
+    withPreloadedState(state) {
       if (preloadedState !== state) {
         preloadedState = state;
         token = {};
@@ -427,9 +448,7 @@ export const configureStore = <TState, TAction extends AnyAction>(
 
   builder.build(buildCallback ?? ((builder) => builder), true);
 
-  if (store) {
-    Object.assign(store, { builder });
-  }
+  if (store) Object.assign(store, { builder });
 
   return store as Store<TState, TAction>;
 };
@@ -449,64 +468,84 @@ export type SelectorState<TName extends string, TState> = {
   [key in TName]: TState;
 };
 
-export type LoadableSlice<TName extends string, TState, TArg> = EnhancedSlice<
-  Loadable<TState>,
-  {},
-  TName
-> & {
-  dataSelector: Selector<TName, Loadable<TState>, TState>;
+export type LoadableSlice<
+  TName extends string,
+  TState,
+  TArg,
+  TCaseReducers extends SliceCaseReducers<TState>
+> = EnhancedSlice<Loadable<TState>, {}, TName> & {
+  selectData: Selector<TName, Loadable<TState>, TState>;
   actions: {
     cancel(): AnyAction;
     load(payload: TArg): AnyAction;
     loaded(): AnyAction;
     failed(): AnyAction;
     loading(): AnyAction;
-  };
+  } & Slice<TState, TCaseReducers, TName>["actions"];
 };
 
-export type LoadableSliceOptions<TState, TThunkArg, ThunkApiConfig> =
-  AsyncThunkOptions<TThunkArg, ThunkApiConfig> & {
-    initialState?: TState;
-  };
+export type LoadableLoader<
+  TState,
+  TArg = void,
+  TApiConfig extends AsyncThunkConfig = {}
+> = AsyncThunkPayloadCreator<TState, TArg, TApiConfig>;
+
+export type LoadableOptions<
+  TState = any,
+  TThunkArg = void,
+  ThunkApiConfig = any,
+  TCaseReducers extends SliceCaseReducers<TState> = any
+> = AsyncThunkOptions<TThunkArg, ThunkApiConfig> & {
+  initialState?: TState;
+  reducers?: ValidateSliceCaseReducers<TState, TCaseReducers>;
+  extraReducers?:
+    | CaseReducers<NoInfer<TState>, any>
+    | ((builder: ActionReducerMapBuilder<NoInfer<TState>>) => void);
+};
 
 export type CreateLoadableSlice = {
-  <TName extends string, TState, TThunkArg = void>(
-    name: TName,
-    payloadCreator: AsyncThunkPayloadCreator<
-      TState | Promise<TState>,
-      TThunkArg,
-      {}
-    >,
-    options?: LoadableSliceOptions<TState, TThunkArg, {}>
-  ): LoadableSlice<TName, TState, TThunkArg>;
+  /**
+   * create loadable slice without API config
+   */
   <
     TName extends string,
     TState,
-    TThunkArg,
-    ThunkApiConfig extends AsyncThunkConfig
+    TCaseReducers extends SliceCaseReducers<TState>,
+    TArg = void
   >(
     name: TName,
-    payloadCreator: AsyncThunkPayloadCreator<
-      TState | Promise<TState>,
-      TThunkArg,
-      ThunkApiConfig
-    >,
-    options?: LoadableSliceOptions<TState, TThunkArg, ThunkApiConfig>
-  ): LoadableSlice<TName, TState, TThunkArg>;
+    loader: LoadableLoader<TState | Promise<TState>, TArg, {}>,
+    options?: LoadableOptions<TState, TArg, {}, TCaseReducers>
+  ): LoadableSlice<TName, TState, TArg, TCaseReducers>;
+
+  /**
+   * create loadable slice with API config
+   */
+  <
+    TName extends string,
+    TState,
+    TArg,
+    TCaseReducers extends SliceCaseReducers<TState>,
+    TApiConfig extends AsyncThunkConfig
+  >(
+    name: TName,
+    loader: LoadableLoader<TState | Promise<TState>, TArg, TApiConfig>,
+    options?: LoadableOptions<TState, TArg, TApiConfig, TCaseReducers>
+  ): LoadableSlice<TName, TState, TArg, TCaseReducers>;
 };
 
 export interface Loadable<T = any> {
-  isLoading: boolean;
-  isIdle: boolean;
-  isLoaded: boolean;
-  isFailed: boolean;
+  loading: boolean;
+  idle: boolean;
+  loaded: boolean;
+  failed: boolean;
   status: "idle" | "loading" | "failed" | "loaded";
   data: T;
   error?: any;
 }
 
 interface InternalLoadable<T = any> extends Loadable<T> {
-  token?: any;
+  meta?: { defer?: ReturnType<typeof createDefer> };
 }
 
 const createLoadable = <T = any>(
@@ -518,14 +557,12 @@ const createLoadable = <T = any>(
     data,
     error,
     status,
-    isLoaded: status === "loaded",
-    isFailed: status === "failed",
-    isIdle: status === "idle",
-    isLoading: status === "loading",
+    loaded: status === "loaded",
+    failed: status === "failed",
+    idle: status === "idle",
+    loading: status === "loading",
   };
 };
-
-const defaultLoadableState = createLoadable<any>("idle", undefined);
 
 const createDefer = <T = any>() => {
   let resolve: any;
@@ -540,20 +577,29 @@ const createDefer = <T = any>() => {
   });
 };
 
+const getOriginal = <T>(value: T) => {
+  if (isDraft(value)) return original(value);
+  return value;
+};
+
 export const createLoadableSlice: CreateLoadableSlice = (
   name: string,
   payloadCreator: any,
-  options: any = {}
+  options: LoadableOptions = {}
 ): any => {
   let lastAbort: Function | undefined;
-  // the token must be symbol because immer will wrap all object values so we cannot use strict compare (state.token === token)
-  let token: any = {};
-  const defers = new WeakMap<any, ReturnType<typeof createDefer>>();
-  const initialLoadable =
-    typeof options.initialState !== "undefined"
-      ? { ...createLoadable("loaded", options.initialState), token }
-      : defaultLoadableState;
+  let meta: InternalLoadable["meta"] = {};
 
+  const initialLoadable = createLoadable("idle", options.initialState);
+  const dataSlice =
+    options.reducers || options.extraReducers
+      ? createSliceOriginal({
+          name,
+          initialState: initialLoadable.data,
+          reducers: options.reducers ?? {},
+          extraReducers: options.extraReducers,
+        })
+      : undefined;
   const thunk = createAsyncThunk(
     `${name}/load`,
     (...args) => {
@@ -561,7 +607,7 @@ export const createLoadableSlice: CreateLoadableSlice = (
       lastAbort = result?.abort;
       return result;
     },
-    options
+    { ...options }
   );
 
   const cancel = createAction(`${name}/cancel`, () => {
@@ -573,68 +619,70 @@ export const createLoadableSlice: CreateLoadableSlice = (
     initialLoadable,
     {},
     {
-      extraReducers: (builder) =>
+      extraReducers: (builder) => {
         builder
           .addCase(thunk.pending, (state) => {
-            token = {};
-            defers.set(token, createDefer());
+            meta = {};
+            // avoid redux's 'non-serialized value in store' warning
+            Object.defineProperty(meta, "defer", {
+              value: createDefer(),
+              enumerable: false,
+              configurable: false,
+            });
             return {
               ...createLoadable("loading", state.data),
-              token,
+              meta: meta,
             };
           })
           .addCase(thunk.fulfilled, (state, action) => {
-            const originalToken = original(state.token);
-            if (originalToken !== token) return state;
-            const defer = defers.get(originalToken);
-            if (defer) {
-              defer.resolve(action.payload);
-              defers.delete(originalToken);
-            }
-            return { ...createLoadable("loaded", action.payload), token };
+            const originalMeta = getOriginal(state.meta);
+            if (originalMeta !== meta) return state;
+            originalMeta?.defer?.resolve(action.payload);
+            return { ...createLoadable("loaded", action.payload), meta: meta };
           })
           .addCase(thunk.rejected, (state, action) => {
-            const originalToken = original(state.token);
-            if (originalToken !== token) return state;
-            const defer = defers.get(originalToken);
-            if (defer) {
-              defer.reject(action.error);
-              defers.delete(originalToken);
-            }
+            const originalMeta = getOriginal(state.meta);
+            originalMeta?.defer?.reject(action.error);
             return {
               ...createLoadable("failed", state.data, action.error),
-              token,
+              meta,
             };
           })
           .addCase(cancel, (state) => {
-            const originalToken = original(state.token);
-            if (!state.isLoading || originalToken !== token) return state;
-            const defer = defers.get(originalToken);
-            if (defer) defers.delete(originalToken);
+            const originalMeta = getOriginal(state.meta);
+            if (!state.loading || originalMeta !== meta) return state;
             return createLoadable(
-              state.isLoaded ? "loaded" : "idle",
+              getOriginal(state.data) === initialLoadable.data
+                ? "idle"
+                : "loaded",
               state.data
             );
-          }),
+          });
+        if (dataSlice) {
+          builder.addDefaultCase((state, action) => {
+            if (state.loading || state.idle) return state;
+            const prevData = getOriginal(state.data);
+            const nextData = getOriginal(dataSlice.reducer(state.data, action));
+
+            if (prevData !== nextData) {
+              return createLoadable("loaded", nextData);
+            }
+            return state;
+          });
+        }
+      },
     }
   );
 
-  const handleSuspenseErrorBoundary = (loadable: InternalLoadable) => {
-    if (loadable.isFailed) throw loadable.error;
-    if (loadable.isLoading) {
-      const defer = defers.get(loadable.token);
-      if (defer) throw defer;
-      return;
-    }
-  };
-
   return Object.assign(slice, {
-    dataSelector: createSelector((state: any) => {
-      const loadable = slice.selector(state);
-      handleSuspenseErrorBoundary(loadable);
+    selectData: createSelector((state: any) => {
+      const loadable = slice.select(state);
+      if (loadable.failed) throw loadable.error;
+      if (loadable.loading) throw loadable.meta?.defer;
       return loadable.data;
     }),
     actions: {
+      ...dataSlice?.actions,
       load: thunk,
       loading: thunk.pending,
       loaded: thunk.fulfilled,

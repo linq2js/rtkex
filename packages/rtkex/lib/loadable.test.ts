@@ -5,13 +5,19 @@ const delay = (ms: number = 0) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 test("loaded", async () => {
-  const slice = createLoadableSlice("slice", async () => 1);
-  const store = configureStore((builder) => builder.addSlice(slice));
+  const slice = createLoadableSlice("slice", async () => 1, {
+    reducers: {
+      increment: (state) => state + 1,
+    },
+  });
+  const store = configureStore((builder) => builder.withSlice(slice));
   expect(store.getState().slice.data).toBe(undefined);
   store.dispatch(slice.actions.load());
-  expect(store.getState().slice.isLoading).toBeTruthy();
+  expect(store.getState().slice.loading).toBeTruthy();
   await delay();
   expect(store.getState().slice.data).toBe(1);
+  store.dispatch(slice.actions.increment());
+  expect(store.getState().slice.data).toBe(2);
 });
 
 test("failed", async () => {
@@ -22,10 +28,10 @@ test("failed", async () => {
     doSomethingWrong();
     return 1;
   });
-  const store = configureStore((builder) => builder.addSlice(slice));
+  const store = configureStore((builder) => builder.withSlice(slice));
   expect(store.getState().slice.data).toBe(undefined);
   store.dispatch(slice.actions.load());
-  expect(store.getState().slice.isLoading).toBeTruthy();
+  expect(store.getState().slice.loading).toBeTruthy();
   await delay();
   expect(store.getState().slice.error.message).toBe("invalid");
 });

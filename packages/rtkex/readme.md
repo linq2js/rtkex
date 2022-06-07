@@ -46,15 +46,15 @@ const counterSlice = createSlice(
 );
 const store = configureStore((builder) =>
   // add counterSlide to the store
-  builder.addSlice(counterSlice)
+  builder.withSlide(counterSlice)
 );
 
 // retrieve state of slice
 const count1 = useSelector(counterSlice);
-const count2 = useSelector(counterSlice.selector);
+const count2 = useSelector(counterSlice.select);
 const doubleCount = useSelector(
   // passing inner selector to slice selector
-  counterSlice.selector((count) => count * 2)
+  counterSlice.select((count) => count * 2)
 );
 ```
 
@@ -114,7 +114,7 @@ import sliceB from "./features/B/slices/sliceB";
 const store = configureStore((builder) =>
   // no need to add utilSlice here because it will be added whenever sliceA or sliceB added to the store
   // and the utilSlice will be added once
-  builder.addSlice(sliceA).addSlice(sliceB)
+  builder.withSlide(sliceA).withSlide(sliceB)
 );
 ```
 
@@ -134,7 +134,7 @@ const userListSlice = createLoadableSlice(
   }
 );
 
-const store = configureStore((builder) => builder.addSlice(userListSlice));
+const store = configureStore((builder) => builder.withSlide(userListSlice));
 // load user
 store.dispatch(userListSlice.actions.load(123));
 
@@ -143,10 +143,10 @@ const userList = useSelector(userListSlice);
 console.log(userList.data);
 console.log(userList.error);
 console.log(userList.status);
-console.log(userList.isIdle);
-console.log(userList.isLoading);
-console.log(userList.isLoaded);
-console.log(userList.isFailed);
+console.log(userList.idle);
+console.log(userList.loading);
+console.log(userList.loaded);
+console.log(userList.failed);
 ```
 
 ## Documentations
