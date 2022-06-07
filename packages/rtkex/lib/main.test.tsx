@@ -1,4 +1,4 @@
-import React, { PropsWithChildren } from "react";
+import { PropsWithChildren } from "react";
 import { Provider, useDispatch } from "react-redux";
 import { AnyAction, Store } from "redux";
 import { createSlice, useSelector, configureStore } from "./main";
