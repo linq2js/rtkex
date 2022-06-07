@@ -20,6 +20,7 @@ import {
   ActionReducerMapBuilder,
   CaseReducers,
   isDraft,
+  MiddlewareAPI,
 } from "@reduxjs/toolkit";
 import { NoInfer } from "@reduxjs/toolkit/dist/tsHelpers";
 import { useState } from "react";
@@ -31,10 +32,8 @@ export type Selector<TName extends string, TState, TSelected = TState> = (
   state: SelectorState<TName, TState>
 ) => TSelected;
 
-export interface WrappedSlice<TName, TState, TActions, TSelector> {
-  name: TName;
-  getInitialState(): TState | undefined;
-  actions: TActions;
+export interface WrappedSlice<TName extends string, TState, TActions, TSelector>
+  extends SliceBase<TName, TState, TActions> {
   selector: TSelector;
   reducer: Reducer<TState>;
 }
@@ -44,7 +43,7 @@ export interface EnhancedSlice<
   TCaseReducers extends SliceCaseReducers<TState> = SliceCaseReducers<TState>,
   TName extends string = string
 > extends Slice<TState, TCaseReducers, TName> {
-  dependencies?: SliceInfo[];
+  dependencies?: SliceBase[];
 
   /**
    * a selector that returns state of slice from root state
@@ -66,6 +65,8 @@ export interface EnhancedSlice<
     Slice<TState, TCaseReducers, TName>["actions"],
     Selector<TName, S>
   >;
+
+  onReady: OnReady<this>;
 }
 
 export type ClonableEnhancedSlice<
@@ -198,14 +199,21 @@ export const createSlice = <
 
   return {
     ...slice,
+    onReady,
     select: select,
     wrap(highOrderReducer, initialState) {
       return {
+        // copy onReadyHandlers of current slice
+        [onReadyHandlersSymbol]: (
+          (this as any)[onReadyHandlersSymbol] as Function[] | undefined
+        )?.slice(),
+        dependencies: options?.dependencies ?? [],
         name: slice.name,
         actions: slice.actions,
         selector: select,
         getInitialState: () => initialState,
         reducer: highOrderReducer(this.reducer),
+        onReady,
       };
     },
     dependencies: options?.dependencies ?? [],
@@ -238,7 +246,7 @@ export interface Injector extends Function {
   inject(buildCallback: DynamicBuildCallback): void;
 }
 
-export interface SliceInfo<
+export interface SliceBase<
   TName extends string = string,
   TState = any,
   TActions = {}
@@ -246,7 +254,8 @@ export interface SliceInfo<
   name: TName;
   reducer: Reducer<TState>;
   actions: TActions;
-  dependencies?: SliceInfo[];
+  dependencies?: SliceBase[];
+  getInitialState(): TState | undefined;
 }
 
 export interface StoreBuilder<
@@ -258,7 +267,7 @@ export interface StoreBuilder<
    * @param slice
    */
   withSlice<S = any, N extends string = string, A = any>(
-    slice: SliceInfo<N, S, A>
+    slice: SliceBase<N, S, A>
   ): StoreBuilder<TState & { [key in N]: S }, TAction | { type: string }>;
 
   /**
@@ -288,6 +297,8 @@ export interface StoreBuilder<
   withEnhancers(...enhancers: StoreEnhancer[]): this;
 }
 
+export type ReadyHandler<T = any> = (api: MiddlewareAPI, context: T) => void;
+
 export type BuildCallback<
   TState = any,
   TAction extends AnyAction = AnyAction
@@ -309,6 +320,7 @@ const createStoreBuilder = (
     reducerMap: Record<string, Reducer>;
     preloadedState: any;
     devTools: any;
+    readyHandlers: Function[];
   }) => void
 ): InternalStoreBuilder<any, any> => {
   let token = {};
@@ -318,15 +330,18 @@ const createStoreBuilder = (
   let enhancers: StoreEnhancer[] = [];
   let devTools: any;
   let preloadedState: any = {};
+  let allReadyHandlers = new Set<Function>();
   let prevToken = token;
 
-  const addSlice = (inputSlice: SliceInfo) => {
-    if (reducerMap[inputSlice.name] !== inputSlice.reducer) {
-      reducerMap = { ...reducerMap, [inputSlice.name]: inputSlice.reducer };
-      token = {};
-      if (inputSlice.dependencies?.length) {
-        inputSlice.dependencies.forEach(addSlice);
-      }
+  const addSlice = (slice: SliceBase) => {
+    if (reducerMap[slice.name] === slice.reducer) return;
+    token = {};
+    // collect ready handlers
+    const readyHandlers = (slice as any)[onReadyHandlersSymbol] as Function[];
+    readyHandlers?.forEach((handler) => allReadyHandlers.add(handler));
+    reducerMap = { ...reducerMap, [slice.name]: slice.reducer };
+    if (slice.dependencies?.length) {
+      slice.dependencies.forEach(addSlice);
     }
   };
 
@@ -337,6 +352,9 @@ const createStoreBuilder = (
       if (!force && prevToken === token) return;
       prevToken = token;
 
+      const readyHandlers = Array.from(allReadyHandlers);
+      allReadyHandlers.clear();
+
       onBuild({
         token,
         reducerMap,
@@ -345,6 +363,7 @@ const createStoreBuilder = (
         enhancers,
         preloadedState,
         devTools,
+        readyHandlers,
       });
 
       return;
@@ -419,6 +438,7 @@ export const configureStore = <TState, TAction extends AnyAction>(
       middleware,
       enhancers,
       devTools,
+      readyHandlers,
     }) => {
       if (Object.keys(reducerMap).length) {
         reducers.push(combineReducers(reducerMap));
@@ -443,6 +463,7 @@ export const configureStore = <TState, TAction extends AnyAction>(
           ],
         });
       }
+      readyHandlers.forEach((handler) => handler(store));
     }
   );
 
@@ -475,14 +496,14 @@ export type LoadableSlice<
   TCaseReducers extends SliceCaseReducers<TState>
 > = EnhancedSlice<Loadable<TState>, {}, TName> & {
   selectData: Selector<TName, Loadable<TState>, TState>;
-  actions: {
+  actions: Slice<TState, TCaseReducers, TName>["actions"] & {
     cancel(): AnyAction;
     load(payload: TArg): AnyAction;
     loaded(): AnyAction;
     failed(): AnyAction;
     loading(): AnyAction;
     clearError(): AnyAction;
-  } & Slice<TState, TCaseReducers, TName>["actions"];
+  };
 };
 
 export type LoadableLoader<
@@ -545,6 +566,8 @@ export interface Loadable<T = any> {
   error?: any;
 }
 
+type OnReady<T> = (handler: ReadyHandler<T>) => T;
+
 interface InternalLoadable<T = any> extends Loadable<T> {
   meta?: { defer?: ReturnType<typeof createDefer> };
 }
@@ -583,6 +606,17 @@ const getOriginal = <T>(value: T) => {
   return value;
 };
 
+const onReadyHandlersSymbol = Symbol("onReadyHandlers");
+function onReady(this: any, handler: Function) {
+  let handlers = this[onReadyHandlersSymbol] as Function[];
+  if (!handlers) {
+    handlers = [];
+    this[onReadyHandlersSymbol] = handlers;
+  }
+  handlers.push((storeApi: any) => handler(storeApi, this));
+  return this;
+}
+
 export const createLoadableSlice: CreateLoadableSlice = (
   name: string,
   payloadCreator: any,
@@ -592,6 +626,7 @@ export const createLoadableSlice: CreateLoadableSlice = (
   let meta: InternalLoadable["meta"] = {};
 
   const initialLoadable = createLoadable("idle", options.initialState);
+  // the dataSlice is for modifying loadable.data only
   const dataSlice =
     options.reducers || options.extraReducers
       ? createSliceOriginal({
@@ -625,9 +660,10 @@ export const createLoadableSlice: CreateLoadableSlice = (
         builder
           .addCase(thunk.pending, (state) => {
             meta = {};
-            // avoid redux's 'non-serialized value in store' warning
+            // we store defer object in meta object, the defer object uses for handling suspense
             Object.defineProperty(meta, "defer", {
               value: createDefer(),
+              // avoid redux's 'non-serialized value in store' warning
               enumerable: false,
               configurable: false,
             });
@@ -640,27 +676,34 @@ export const createLoadableSlice: CreateLoadableSlice = (
             const originalMeta = getOriginal(state.meta);
             if (originalMeta !== meta) return state;
             originalMeta?.defer?.resolve(action.payload);
-            return { ...createLoadable("loaded", action.payload), meta: meta };
+            return createLoadable("loaded", action.payload);
           })
           .addCase(thunk.rejected, (state, action) => {
             const originalMeta = getOriginal(state.meta);
+            if (originalMeta !== meta) return;
             originalMeta?.defer?.reject(action.error);
-            return {
-              ...createLoadable("failed", state.data, action.error),
-              meta,
-            };
+            return createLoadable("failed", state.data, action.error);
           })
-          .addCase(clearError, (state) => createLoadable("idle", state.data))
+          // clear an error and set the loadable status to idle
+          .addCase(clearError, (state) => {
+            if (!state.failed) return state;
+            return createLoadable("idle", state.data);
+          })
           .addCase(cancel, (state) => {
             const originalMeta = getOriginal(state.meta);
-            if (!state.loading || originalMeta !== meta) return state;
-            return createLoadable("idle", state.data);
+            if (originalMeta !== meta) return;
+            // do not perform cancellation if loadable is not loading
+            if (!state.loading) return state;
+            meta = {};
+            return { ...createLoadable("idle", state.data), meta };
           });
         if (dataSlice) {
           builder.addDefaultCase((state, action) => {
+            // prevent user changes data while the slice is loading or it has an error
             if (state.loading || state.failed) return state;
+
             const prevData = getOriginal(state.data);
-            const nextData = getOriginal(dataSlice.reducer(state.data, action));
+            const nextData = dataSlice.reducer(state.data, action);
 
             if (prevData !== nextData) {
               return createLoadable("loaded", nextData);
@@ -673,13 +716,15 @@ export const createLoadableSlice: CreateLoadableSlice = (
   );
 
   return Object.assign(slice, {
+    onReady,
     selectData: createSelector((state: any) => {
       const loadable = slice.select(state);
       if (loadable.failed) throw loadable.error;
-      if (loadable.loading) throw loadable.meta?.defer;
+      if (loadable.loading) throw loadable.meta?.defer as any;
       return loadable.data;
     }),
     actions: {
+      // prepend actions for data
       ...dataSlice?.actions,
       load: thunk,
       loading: thunk.pending,

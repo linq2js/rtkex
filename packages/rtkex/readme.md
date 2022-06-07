@@ -1,4 +1,4 @@
-# `rtkex`
+# `RTKex`
 
 A Redux Toolkit Extension
 
@@ -18,13 +18,14 @@ yarn add rtkex
 
 ## Features
 
-1. New slice dependency logic
-2. New slice selector logic
-3. New store building logic
-4. Support adding slice / reducer dynamically
-5. New useSelector implementation
-6. Support loadable slice
-7. Support suspense and error boundary
+- New slice dependency logic
+- New slice selector logic
+- New store building logic
+- Support adding slice / reducer dynamically
+- New useSelector implementation
+- Support loadable slice
+- Support suspense and error boundary
+- Support onReady event for slice
 
 ## Usages
 
@@ -44,6 +45,7 @@ const counterSlice = createSlice(
     decrement: (state) => state - 1,
   }
 );
+
 const store = configureStore((builder) =>
   // add counterSlide to the store
   builder.withSlide(counterSlice)
@@ -56,6 +58,11 @@ const doubleCount = useSelector(
   // passing inner selector to slice selector
   counterSlice.select((count) => count * 2)
 );
+
+// dispatching actions
+const dispatch = useDispatch();
+dispatch(counterSlice.actions.increment());
+dispatch(counterSlice.actions.decrement());
 ```
 
 ### Slice Dependency
@@ -135,18 +142,74 @@ const userListSlice = createLoadableSlice(
 );
 
 const store = configureStore((builder) => builder.withSlide(userListSlice));
-// load user
+// load users outside component
 store.dispatch(userListSlice.actions.load(123));
+
+// load users inside component
+const dispatch = useDispatch();
+useEffect(() => {
+  dispatch(userListSlice.actions.load(123));
+}, [dispatch]);
+
+// load users once when the slice is added to the store
+const userListSlice = createLoadableSlice(/* ... */).onReady(
+  (storeApi, slice) => {
+    storeApi.dispatch(slice.actions.load(123));
+  }
+);
 
 const userList = useSelector(userListSlice);
 
-console.log(userList.data);
-console.log(userList.error);
-console.log(userList.status);
-console.log(userList.idle);
-console.log(userList.loading);
-console.log(userList.loaded);
-console.log(userList.failed);
+console.log(userList);
+/*
+  loadable object has following properties
+  {
+    data: [...],
+    loading: false,
+    idle: false,
+    loaded: true,
+    error: undefined
+  }
+*/
+```
+
+RTKex also supports Suspense and error boundary for loadable slice
+
+```jsx
+const UserList = () => {
+  // when using selectData selector RTKex will throw a promise if slice is still loading and throw an error if slice has been failed
+  const userList = useSelector(userListSlice.selectData);
+  // the userList value is loadable.data not loadable object
+  console.log(userList); // [...]
+};
+
+<Suspense fallback="Loading...">
+  <UserList />
+</Suspense>;
+```
+
+If you need to add more actions for loadable slice, just following:
+
+```js
+const userListSlice = createLoadableSlice(
+  "users",
+  async (userId: number, thunkAPI) => {
+    const response = await userAPI.fetchById(userId);
+    return response.data;
+  },
+  // options
+  {
+    reducers: {
+      // clear user list action
+      // the state is loadable.data
+      clear: (state) => [],
+    },
+    // you also define extraReducers to handler external actions
+    extraReducers: (builder) =>
+      // clear user list when logout action is dispatched
+      builder.addCase(logoutAction, (state) => []),
+  }
+);
 ```
 
 ## Documentations
