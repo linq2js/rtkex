@@ -16,49 +16,103 @@ npm i rtkex --save
 yarn add rtkex
 ```
 
+## Features
+
+1. New slice dependency logic
+2. New slice selector logic
+3. New store building logic
+4. Dynamic adding slice / reducer
+5. New useSelector implementation
+
 ## Usages
 
-```js
-import {
-  configureStore,
-  createSlice,
-  combineSelectors,
-  useSelector,
-} from "rtkex";
+### Counter App
 
-const counterSlice = createSlice("counter", 1, {
-  increment: (state) => state + 1,
-  decrement: (state) => state - 1,
-});
+```jsx
+import { configureStore, createSlice, useSelector } from "rtkex";
 
-const ASlice = createSlice("A", 1, { increment: (state) => state + 1 });
-const BSlice = createSlice("B", 2, { increment: (state) => state + 1 });
-const sumSelector = combineSelectors(
+const counterSlice = createSlice(
+  // slide name
+  "counter",
+  // slide initial state
+  1,
+  // reducers
   {
-    // pass slice directly
-    A: ASlice,
-    B: BSlice,
-    // or pass selector function
-    count: counterSlice.selector,
-  },
-  (/* selected  */ { A, B, count }) => A + B + count
+    increment: (state) => state + 1,
+    decrement: (state) => state - 1,
+  }
 );
-
-// create store with enhanced slices
 const store = configureStore((builder) =>
-  builder.addSlice(ASlice).addSlice(BSlice)
+  // add counterSlide to the store
+  builder.addSlice(counterSlice)
 );
 
-// using slice's selector to retrieve count state
-const count = useSelector(counterSlice.selector);
-const sum1 = useSelector(sumSelector);
-const sum2 = useSelector(
+// retrieve state of slice
+const count1 = useSelector(counterSlice);
+const count2 = useSelector(counterSlice.selector);
+const doubleCount = useSelector(
+  // passing inner selector to slice selector
+  counterSlice.selector((count) => count * 2)
+);
+```
+
+### Slice Dependency
+
+Let say you orignaize your project as following structure
+
+```
+  features/
+    util/
+      slices/
+        utilSlice.js
+    A/
+      slices/
+        sliceA.js
+    B/
+      slices/
+        sliceB.js
+```
+
+Both of sliceA and sliceB depdend on utilSlice
+
+sliceA.js
+
+```js
+import utilSlice from "./features/util/slices/utilSlice";
+const sliceA = createSlice(
+  "sliceA",
+  undefined,
   {
-    A: ASlice,
-    B: BSlice,
-    count: counterSlice.selector,
+    /* reducer logics here */
   },
-  ({ A, B, count }) => A + B + count
+  { dependencies: [utilSlice] }
+);
+```
+
+**sliceB.js**
+
+```js
+import utilSlice from "./features/util/slices/utilSlice";
+const sliceB = createSlice(
+  "sliceA",
+  undefined,
+  {
+    /* reducer logics here */
+  },
+  { dependencies: [utilSlice] }
+);
+```
+
+**store.js**
+
+```js
+import sliceA from "./features/A/slices/sliceA";
+import sliceB from "./features/B/slices/sliceB";
+
+const store = configureStore((builder) =>
+  // no need to add utilSlice here because it will be added whenever sliceA or sliceB added to the store
+  // and the utilSlice will be added once
+  builder.addSlice(sliceA).addSlice(sliceB)
 );
 ```
 

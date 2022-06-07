@@ -14,6 +14,8 @@ import {
 import { useState } from "react";
 import { EqualityFn, useSelector as selectorHook, useStore } from "react-redux";
 
+export * from "@reduxjs/toolkit";
+
 export type Selector<TName extends string, TState> = (state: {
   [key in TName]: TState;
 }) => TState;
@@ -32,7 +34,26 @@ export interface EnhancedSlice<
   TName extends string = string
 > extends Slice<TState, TCaseReducers, TName> {
   dependencies?: SliceInfo[];
-  selector: (state: { [key in TName]: TState }) => TState;
+
+  /**
+   * a selector that returns state of slice from root state
+   * @param state
+   */
+  selector(state: { [key in TName]: TState }): TState;
+
+  /**
+   * create new selector with innerSelector. The innerSelector retrieves state of slice and returns selected value
+   * @param innerSelector
+   */
+  selector<TSelected>(
+    innerSelector: (selected: TState) => TSelected
+  ): (state: { [key in TName]: TState }) => TSelected;
+
+  /**
+   * wrap the reducer of the slice with high order reducer
+   * @param highOrderReducer
+   * @param initialState
+   */
   wrap<S>(
     highOrderReducer: (reducer: Reducer<TState>) => Reducer<S>,
     initialState?: S
@@ -105,6 +126,11 @@ export type UseSelector = {
     combiner: Combiner<TSelectors, TSelected>,
     equalityFn?: EqualityFn<TSelected> | undefined
   ): TSelected;
+
+  <TSelected>(
+    slide: EnhancedSlice<TSelected>,
+    equalityFn?: EqualityFn<TSelected> | undefined
+  ): TSelected;
 };
 
 /**
@@ -156,7 +182,15 @@ export const createSlice = <
     initialState,
     reducers,
   });
-  const selector = (state: any) => state[slice.name];
+
+  const selector = (state: any) => {
+    // a curry call so we create new selector
+    if (typeof state === "function") {
+      const customSelector = state;
+      return (state: any) => customSelector(state[slice.name]);
+    }
+    return state[slice.name];
+  };
 
   return {
     ...slice,
@@ -180,6 +214,13 @@ export const createSlice = <
 export const useSelector: UseSelector = (...args: any[]) => {
   if (typeof args[0] === "function") {
     return selectorHook(args[0], args[1]);
+  }
+  if (
+    args[0].name &&
+    args[0].reducer &&
+    typeof args[0].selector === "function"
+  ) {
+    return selectorHook(args[0].selector, args[1]);
   }
   return selectorHook(combineSelectors(args[0], args[1]), args[2]);
 };
@@ -210,7 +251,7 @@ export interface StoreBuilder<
 > {
   addSlice<S = any, N extends string = string, A = any>(
     slice: SliceInfo<N, S, A>
-  ): StoreBuilder<TState & { [key in N]: S }, TAction | { type: keyof A }>;
+  ): StoreBuilder<TState & { [key in N]: S }, TAction | { type: string }>;
 
   addMiddleware(...middleware: Middleware[]): this;
 
@@ -256,7 +297,7 @@ const createStoreBuilder = (
   let middleware: Middleware[] = [];
   let enhancers: StoreEnhancer[] = [];
   let devTools: any;
-  let preloadedState: any;
+  let preloadedState: any = {};
   let prevToken = token;
 
   const addSlice = (inputSlice: SliceInfo) => {
@@ -331,12 +372,17 @@ const createStoreBuilder = (
   };
 };
 
-export const useBuilder = (buildCallback: DynamicBuildCallback) => {
+/**
+ * A hook that can access store builder of current store. Use store builder for adding reducers or slides dynamically
+ * @param buildCallbacks
+ */
+export const useBuilder = (...buildCallbacks: DynamicBuildCallback[]) => {
   const store = useStore();
+
   useState(() => {
     const builder = (store as any).builder as InternalStoreBuilder;
     if (!builder) throw new Error("The current store does not support builder");
-    builder.build(buildCallback);
+    builder.build(() => buildCallbacks.forEach((x) => x(builder)));
   });
 };
 
