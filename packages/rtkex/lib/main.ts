@@ -569,7 +569,13 @@ export interface Loadable<T = any> {
 type OnReady<T> = (handler: ReadyHandler<T>) => T;
 
 interface InternalLoadable<T = any> extends Loadable<T> {
-  meta?: { defer?: ReturnType<typeof createDefer> };
+  meta?: {
+    requestId?: any;
+    extra?: {
+      abort?: Function;
+      defer?: ReturnType<typeof createDefer>;
+    };
+  };
 }
 
 const createLoadable = <T = any>(
@@ -623,7 +629,6 @@ export const createLoadableSlice: CreateLoadableSlice = (
   options: LoadableOptions = {}
 ): any => {
   let lastAbort: Function | undefined;
-  let meta: InternalLoadable["meta"] = {};
 
   const initialLoadable = createLoadable("idle", options.initialState);
   // the dataSlice is for modifying loadable.data only
@@ -658,30 +663,33 @@ export const createLoadableSlice: CreateLoadableSlice = (
     {
       extraReducers: (builder) => {
         builder
-          .addCase(thunk.pending, (state) => {
-            meta = {};
+          .addCase(thunk.pending, (state, action) => {
+            const meta = { requestId: action.meta.requestId };
             // we store defer object in meta object, the defer object uses for handling suspense
-            Object.defineProperty(meta, "defer", {
-              value: createDefer(),
+            Object.defineProperty(meta, "extra", {
+              value: {
+                defer: createDefer(),
+                abort: lastAbort,
+              },
               // avoid redux's 'non-serialized value in store' warning
               enumerable: false,
               configurable: false,
             });
             return {
               ...createLoadable("loading", state.data),
-              meta: meta,
+              meta,
             };
           })
           .addCase(thunk.fulfilled, (state, action) => {
             const originalMeta = getOriginal(state.meta);
-            if (originalMeta !== meta) return state;
-            originalMeta?.defer?.resolve(action.payload);
+            if (originalMeta?.requestId !== action.meta.requestId) return state;
+            originalMeta?.extra?.defer?.resolve(action.payload);
             return createLoadable("loaded", action.payload);
           })
           .addCase(thunk.rejected, (state, action) => {
             const originalMeta = getOriginal(state.meta);
-            if (originalMeta !== meta) return;
-            originalMeta?.defer?.reject(action.error);
+            if (originalMeta?.requestId !== action.meta.requestId) return state;
+            originalMeta?.extra?.defer?.reject(action.error);
             return createLoadable("failed", state.data, action.error);
           })
           // clear an error and set the loadable status to idle
@@ -690,12 +698,10 @@ export const createLoadableSlice: CreateLoadableSlice = (
             return createLoadable("idle", state.data);
           })
           .addCase(cancel, (state) => {
-            const originalMeta = getOriginal(state.meta);
-            if (originalMeta !== meta) return;
             // do not perform cancellation if loadable is not loading
             if (!state.loading) return state;
-            meta = {};
-            return { ...createLoadable("idle", state.data), meta };
+            state.meta?.extra?.abort?.();
+            return { ...createLoadable("idle", state.data), meta: {} };
           });
         if (dataSlice) {
           builder.addDefaultCase((state, action) => {
@@ -720,7 +726,7 @@ export const createLoadableSlice: CreateLoadableSlice = (
     selectData: createSelector((state: any) => {
       const loadable = slice.select(state);
       if (loadable.failed) throw loadable.error;
-      if (loadable.loading) throw loadable.meta?.defer as any;
+      if (loadable.loading) throw loadable.meta?.extra?.defer as any;
       return loadable.data;
     }),
     actions: {

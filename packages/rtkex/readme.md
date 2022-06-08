@@ -1,6 +1,6 @@
 # `RTKex`
 
-A Redux Toolkit Extension
+A (Redux Toolkit)[https://redux-toolkit.js.org/] Extension
 
 ## Installation
 
@@ -103,7 +103,7 @@ const sliceA = createSlice(
 ```js
 import utilSlice from "./features/util/slices/utilSlice";
 const sliceB = createSlice(
-  "sliceA",
+  "sliceB",
   undefined,
   {
     /* reducer logics here */
