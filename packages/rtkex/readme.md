@@ -125,6 +125,24 @@ const store = configureStore((builder) =>
 );
 ```
 
+### Dynamic adding slice to the store
+
+```js
+// create a store wihout any slice
+const store = configureStore();
+
+// counter.js
+import { useBuilder, useSelector } from "rtkex";
+import counterSlice from "./slices/counterSlice";
+
+function Counter() {
+  // easy ?
+  useBuilder((builder) => builder.withSlice(counterSlice));
+  // use the slice afterward
+  const count = useSelector(counterSlice);
+}
+```
+
 ### Loadable slice
 
 Redux toolkit supports createAsyncThunk but it is complicated to use. RTKex wraps slice and thunk logics into one place, it is loadable slice
