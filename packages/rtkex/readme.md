@@ -1,6 +1,18 @@
+- [`RTKex`](#rtkex)
+  - [Installation](#installation)
+  - [Recipes](#recipes)
+    - [New store confugration method](#new-store-confugration-method)
+    - [New slice implementation](#new-slice-implementation)
+    - [Slice selector](#slice-selector)
+    - [Slice dependency logic](#slice-dependency-logic)
+    - [Dynamic adding slice to the store](#dynamic-adding-slice-to-the-store)
+    - [Using slice ready event](#using-slice-ready-event)
+    - [Loadable slice](#loadable-slice)
+  - [API references](#api-references)
+
 # `RTKex`
 
-A (Redux Toolkit)[https://redux-toolkit.js.org/] Extension
+An extension for [Redux Toolkit](https://redux-toolkit.js.org/)
 
 ## Installation
 
@@ -16,113 +28,84 @@ npm i rtkex --save
 yarn add rtkex
 ```
 
-## Features
+## Recipes
 
-- New slice dependency logic
-- New slice selector logic
-- New store building logic
-- Support adding slice / reducer dynamically
-- New useSelector implementation
-- Support loadable slice
-- Support suspense and error boundary
-- Support onReady event for slice
+### New store confugration method
 
-## Usages
+RTKex provides new configreStore(), it retrieves buildCallback.
 
-### Counter App
+```js
+import { configureStore } from "rtkex";
 
-```jsx
-import { configureStore, createSlice, useSelector } from "rtkex";
+const store = configureStore((builder) =>
+  builder
+    .withSlice(slice1)
+    .withSlice(slice2)
+    .withMiddleware(middleware1, middleware2)
+    .withReducer(reducer1)
+    .withReducer(reducer2)
+    .withDevTools(enabled)
+    .withDevTools(devToolsOptions)
+    .withEnhancers(enhancer1, enhancer2)
+);
+```
+
+### New slice implementation
+
+RTKex has new implementation of createSlice, it retrieves following parameters createSlice(name, initialState, reducers, options).
+RTKex also provides some extra properties for slice object
+
+```js
+import { createSlice, configureStore } from "rtkex";
 
 const counterSlice = createSlice(
-  // slide name
-  "counter",
-  // slide initial state
+  // slide name, where to put data in the app state tree
+  "count",
+  // initial state
   1,
-  // reducers
+  // main reducers
   {
     increment: (state) => state + 1,
     decrement: (state) => state - 1,
+  },
+  // options
+  {
+    extraReducers: (builder) => {},
   }
 );
 
-const store = configureStore((builder) =>
-  // add counterSlide to the store
-  builder.withSlide(counterSlice)
-);
+// register the slice to the store with ease
+const store = configureStore((builder) => builder.withSlice(counterSlice));
+// with RTK you should do
+// configureStore({  reducer: { count: counterSlice.reducer } })
 
-// retrieve state of slice
-const count1 = useSelector(counterSlice);
-const count2 = useSelector(counterSlice.select);
-const doubleCount = useSelector(
-  // passing inner selector to slice selector
-  counterSlice.select((count) => count * 2)
-);
-
-// dispatching actions
-const dispatch = useDispatch();
-dispatch(counterSlice.actions.increment());
-dispatch(counterSlice.actions.decrement());
+// now the store has following state tree {  count: 1 }
 ```
 
-### Slice Dependency
+### Slice selector
 
-Let say you orignaize your project as following structure
-
-```
-  features/
-    util/
-      slices/
-        utilSlice.js
-    A/
-      slices/
-        sliceA.js
-    B/
-      slices/
-        sliceB.js
-```
-
-Both of sliceA and sliceB depdend on utilSlice
-
-sliceA.js
+The slice has built-in selector (slice.select() function), that uses to select the state of slice from app state tree. You also pass custom selector to select() function
 
 ```js
-import utilSlice from "./features/util/slices/utilSlice";
-const sliceA = createSlice(
-  "sliceA",
-  undefined,
-  {
-    /* reducer logics here */
-  },
-  { dependencies: [utilSlice] }
-);
+import { useSelector } from "rtkex";
+
+const count1 = counterSlice.select(store.getState());
+const count2 = useSelector(counterSlice);
+const count3 = useSelector(counterSlice.select);
+const doubleCount = useSelector(counterSlice.select((count) => count * 2));
 ```
 
-**sliceB.js**
+### Slice dependency logic
+
+A slice can depend on one or many other slices. When configuring the store, you just need to add dependent slices, all their dependencies will be added as well
 
 ```js
-import utilSlice from "./features/util/slices/utilSlice";
-const sliceB = createSlice(
-  "sliceB",
-  undefined,
-  {
-    /* reducer logics here */
-  },
-  { dependencies: [utilSlice] }
-);
-```
+import { createSlice, configureStore } from "rtkex";
 
-**store.js**
-
-```js
-import sliceA from "./features/A/slices/sliceA";
-import sliceB from "./features/B/slices/sliceB";
-
-const store = configureStore((builder) =>
-  // no need to add utilSlice here because it will be added whenever sliceA or sliceB added to the store
-  // and the utilSlice will be added once
-  builder.withSlide(sliceA).withSlide(sliceB)
-);
+const slice1 = createSlice("slice1", 0, {});
+const slice2 = createSlice("slice2", 0, {}, { dependencies: [slice1] });
+// no need to add slice1
+configureStore((builder) => builder.withSlice(slice2));
 ```
 
 ### Dynamic adding slice to the store
@@ -141,6 +124,19 @@ function Counter() {
   // use the slice afterward
   const count = useSelector(counterSlice);
 }
+```
+
+### Using slice ready event
+
+Slice Ready Event uses to handle something whenever the slice added to the store
+
+```js
+const mySlice = createSlice().onReady((storeApi, slice) => {
+  // dispatch an action
+  storeApi.dispatch(action);
+  // get the current store state
+  storeApi.getState();
+});
 ```
 
 ### Loadable slice
@@ -206,7 +202,7 @@ const UserList = () => {
 </Suspense>;
 ```
 
-If you need to add more actions for loadable slice, just following:
+If you need to add more actions for loadable slice, just use following code:
 
 ```js
 const userListSlice = createLoadableSlice(
@@ -230,6 +226,6 @@ const userListSlice = createLoadableSlice(
 );
 ```
 
-## Documentations
+## API references
 
 https://linq2js.github.io/rtkex/
