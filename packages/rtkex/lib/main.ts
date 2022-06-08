@@ -1,7 +1,5 @@
-import {
+import type {
   AnyAction,
-  createSlice as createSliceOriginal,
-  configureStore as configureStoreOriginal,
   CreateSliceOptions,
   Middleware,
   Reducer,
@@ -9,18 +7,22 @@ import {
   SliceCaseReducers,
   Store,
   StoreEnhancer,
-  combineReducers,
-  createAsyncThunk,
   AsyncThunkPayloadCreator,
   AsyncThunkOptions,
   Dispatch,
-  createAction,
-  original,
   ValidateSliceCaseReducers,
   ActionReducerMapBuilder,
   CaseReducers,
-  isDraft,
   MiddlewareAPI,
+} from "@reduxjs/toolkit";
+import {
+  createSlice as createSliceOriginal,
+  configureStore as configureStoreOriginal,
+  combineReducers,
+  createAsyncThunk,
+  createAction,
+  original,
+  isDraft,
 } from "@reduxjs/toolkit";
 import { NoInfer } from "@reduxjs/toolkit/dist/tsHelpers";
 import { useState } from "react";
@@ -69,7 +71,7 @@ export interface EnhancedSlice<
   onReady: OnReady<this>;
 }
 
-export type ClonableEnhancedSlice<
+export type ClonableSlice<
   TState = any,
   TCaseReducers extends SliceCaseReducers<TState> = SliceCaseReducers<TState>,
   TName extends string = string
@@ -81,7 +83,7 @@ export type ClonableEnhancedSlice<
    */
   clone<TNewName extends string>(
     newName: TNewName
-  ): ClonableEnhancedSlice<TState, TCaseReducers, TNewName>;
+  ): ClonableSlice<TState, TCaseReducers, TNewName>;
 };
 
 export type Combiner<TSelectors, TResult> = (values: {
@@ -137,114 +139,9 @@ export type UseSelector = {
   ): TSelected;
 };
 
-/**
- * combine multiple selectors/slice selectors into one selector
- * @param selectors
- * @param combiner
- * @returns
- */
-export const combineSelectors = <TSelectors, TResult>(
-  selectors: TSelectors,
-  combiner: Combiner<TSelectors, TResult>
-) => {
-  const entries = Object.entries(selectors);
-  return (state: any): TResult => {
-    const selected: any = {};
-    entries.forEach(([key, selector]) => {
-      selected[key] =
-        typeof selector === "function"
-          ? selector(state)
-          : selector.selector(state);
-    });
-    return combiner(selected);
-  };
-};
-
-const createSelector =
-  (originalSelector: (state: any) => any) => (input: any) => {
-    if (typeof input === "function") {
-      return (state: any) => input(originalSelector(state));
-    }
-    return originalSelector(input);
-  };
-
-/**
- * create a slice that includes enhanced props
- * @param name
- * @param initialState
- * @param options
- * @returns
- */
-export const createSlice = <
-  TState,
-  TCaseReducers extends SliceCaseReducers<TState>,
-  TName extends string = string
->(
-  name: TName,
-  initialState: TState,
-  reducers: CreateSliceOptions<TState, TCaseReducers, TName>["reducers"],
-  options?: Omit<
-    CreateSliceOptions<TState, TCaseReducers, TName>,
-    "name" | "initialState" | "reducers"
-  > & { dependencies?: Slice[] }
-): ClonableEnhancedSlice<TState, TCaseReducers, TName> => {
-  const slice = createSliceOriginal({
-    ...options,
-    name,
-    initialState,
-    reducers,
-  });
-
-  const select = createSelector((state) => state[slice.name]);
-
-  return {
-    ...slice,
-    onReady,
-    select: select,
-    wrap(highOrderReducer, initialState) {
-      return {
-        // copy onReadyHandlers of current slice
-        [onReadyHandlersSymbol]: (
-          (this as any)[onReadyHandlersSymbol] as Function[] | undefined
-        )?.slice(),
-        dependencies: options?.dependencies ?? [],
-        name: slice.name,
-        actions: slice.actions,
-        selector: select,
-        getInitialState: () => initialState,
-        reducer: highOrderReducer(this.reducer),
-        onReady,
-      };
-    },
-    dependencies: options?.dependencies ?? [],
-    clone<TNewName extends string>(newName: TNewName) {
-      return createSlice(newName, initialState, reducers, options);
-    },
-  };
-};
-
-export const useSelector: UseSelector = (...args: any[]) => {
-  if (typeof args[0] === "function") {
-    return selectorHook(args[0], args[1]);
-  }
-  if (
-    args[0].name &&
-    args[0].reducer &&
-    typeof args[0].selector === "function"
-  ) {
-    return selectorHook(args[0].selector, args[1]);
-  }
-  return selectorHook(combineSelectors(args[0], args[1]), args[2]);
-};
-
 export type DynamicBuildCallback = (
   builder: Pick<StoreBuilder, "withSlice" | "withReducer">
 ) => void;
-
-export interface Injector extends Function {
-  (builder: StoreBuilder): void;
-  inject(buildCallback: DynamicBuildCallback): void;
-}
 
 export interface SliceBase<
   TName extends string = string,
@@ -304,12 +201,219 @@ export type BuildCallback<
   TAction extends AnyAction = AnyAction
 > = (builder: StoreBuilder<{}, never>) => StoreBuilder<TState, TAction>;
 
+export type AsyncThunkConfig = {
+  state?: unknown;
+  dispatch?: Dispatch;
+  extra?: unknown;
+  rejectValue?: unknown;
+  serializedErrorType?: unknown;
+  pendingMeta?: unknown;
+  fulfilledMeta?: unknown;
+  rejectedMeta?: unknown;
+};
+
+export type SelectorState<TName extends string, TState> = {
+  [key in TName]: TState;
+};
+
+export type LoadableSlice<
+  TName extends string,
+  TState,
+  TArg,
+  TCaseReducers extends SliceCaseReducers<TState>
+> = EnhancedSlice<Loadable<TState>, {}, TName> & {
+  selectData: Selector<TName, Loadable<TState>, TState>;
+  actions: Slice<TState, TCaseReducers, TName>["actions"] & {
+    cancel(): AnyAction;
+    load(payload: TArg): AnyAction;
+    loaded(): AnyAction;
+    failed(): AnyAction;
+    loading(): AnyAction;
+    clearError(): AnyAction;
+  };
+};
+
+export type LoadableLoader<
+  TState,
+  TArg = void,
+  TApiConfig extends AsyncThunkConfig = {}
+> = AsyncThunkPayloadCreator<TState, TArg, TApiConfig>;
+
+export type LoadableOptions<
+  TState = any,
+  TThunkArg = void,
+  ThunkApiConfig = any,
+  TCaseReducers extends SliceCaseReducers<TState> = any
+> = AsyncThunkOptions<TThunkArg, ThunkApiConfig> & {
+  initialState?: TState;
+  reducers?: ValidateSliceCaseReducers<TState, TCaseReducers>;
+  extraReducers?:
+    | CaseReducers<NoInfer<TState>, any>
+    | ((builder: ActionReducerMapBuilder<NoInfer<TState>>) => void);
+};
+
+export type CreateLoadableSlice = {
+  /**
+   * create loadable slice without API config
+   */
+  <
+    TName extends string,
+    TState,
+    TCaseReducers extends SliceCaseReducers<TState>,
+    TArg = void
+  >(
+    name: TName,
+    loader: LoadableLoader<TState | Promise<TState>, TArg, {}>,
+    options?: LoadableOptions<TState, TArg, {}, TCaseReducers>
+  ): LoadableSlice<TName, TState, TArg, TCaseReducers>;
+
+  /**
+   * create loadable slice with API config
+   */
+  <
+    TName extends string,
+    TState,
+    TArg,
+    TCaseReducers extends SliceCaseReducers<TState>,
+    TApiConfig extends AsyncThunkConfig
+  >(
+    name: TName,
+    loader: LoadableLoader<TState | Promise<TState>, TArg, TApiConfig>,
+    options?: LoadableOptions<TState, TArg, TApiConfig, TCaseReducers>
+  ): LoadableSlice<TName, TState, TArg, TCaseReducers>;
+};
+
+export interface Loadable<T = any> {
+  loading: boolean;
+  idle: boolean;
+  loaded: boolean;
+  failed: boolean;
+  status: "idle" | "loading" | "failed" | "loaded";
+  data: T;
+  error?: any;
+}
+
+type OnReady<T> = (handler: ReadyHandler<T>) => T;
+
 interface InternalStoreBuilder<
   TState = any,
   TAction extends AnyAction = AnyAction
 > extends StoreBuilder<TState, TAction> {
   build(buildCallback: (builder: this) => any, force?: boolean): void;
 }
+
+interface InternalLoadable<T = any> extends Loadable<T> {
+  meta?: {
+    requestId?: any;
+    extra?: {
+      abort?: Function;
+      defer?: ReturnType<typeof createDefer>;
+    };
+  };
+}
+
+/**
+ * combine multiple selectors/slice selectors into one selector
+ * @param selectors
+ * @param combiner
+ * @returns
+ */
+export const combineSelectors = <TSelectors, TResult>(
+  selectors: TSelectors,
+  combiner: Combiner<TSelectors, TResult>
+) => {
+  const entries = Object.entries(selectors);
+  return (state: any): TResult => {
+    const selected: any = {};
+    entries.forEach(([key, selector]) => {
+      selected[key] =
+        typeof selector === "function"
+          ? selector(state)
+          : selector.selector(state);
+    });
+    return combiner(selected);
+  };
+};
+
+const createSelector =
+  (originalSelector: (state: any) => any) => (input: any) => {
+    if (typeof input === "function") {
+      return (state: any) => input(originalSelector(state));
+    }
+    return originalSelector(input);
+  };
+
+/**
+ * create a slice that includes enhanced props
+ * @param name
+ * @param initialState
+ * @param options
+ * @returns
+ */
+export const createSlice = <
+  TState,
+  TCaseReducers extends SliceCaseReducers<TState>,
+  TName extends string = string
+>(
+  name: TName,
+  initialState: TState,
+  reducers: CreateSliceOptions<TState, TCaseReducers, TName>["reducers"],
+  options?: Omit<
+    CreateSliceOptions<TState, TCaseReducers, TName>,
+    "name" | "initialState" | "reducers"
+  > & { dependencies?: Slice[] }
+): ClonableSlice<TState, TCaseReducers, TName> => {
+  const slice = createSliceOriginal({
+    ...options,
+    name,
+    initialState,
+    reducers,
+  });
+
+  const select = createSelector((state) => state[slice.name]);
+
+  return {
+    ...slice,
+    onReady,
+    select: select,
+    wrap(highOrderReducer, initialState) {
+      return {
+        // copy onReadyHandlers of current slice
+        [onReadyHandlersSymbol]: (
+          (this as any)[onReadyHandlersSymbol] as Function[] | undefined
+        )?.slice(),
+        dependencies: options?.dependencies ?? [],
+        name: slice.name,
+        actions: slice.actions,
+        selector: select,
+        getInitialState: () => initialState,
+        reducer: highOrderReducer(this.reducer),
+        onReady,
+      };
+    },
+    dependencies: options?.dependencies ?? [],
+    clone<TNewName extends string>(newName: TNewName) {
+      return createSlice(newName, initialState, reducers, options);
+    },
+  };
+};
+
+export const useSelector: UseSelector = (...args: any[]) => {
+  // is selector
+  if (typeof args[0] === "function") {
+    return selectorHook(args[0], args[1]);
+  }
+  // is slice
+  if (
+    args[0].name &&
+    args[0].reducer &&
+    typeof args[0].selector === "function"
+  ) {
+    return selectorHook(args[0].selector, args[1]);
+  }
+  // is combineSelectors arguments
+  return selectorHook(combineSelectors(args[0], args[1]), args[2]);
+};
 
 const createStoreBuilder = (
   onBuild: (data: {
@@ -474,110 +578,6 @@ export const configureStore = <TState, TAction extends AnyAction>(
   return store as Store<TState, TAction>;
 };
 
-export type AsyncThunkConfig = {
-  state?: unknown;
-  dispatch?: Dispatch;
-  extra?: unknown;
-  rejectValue?: unknown;
-  serializedErrorType?: unknown;
-  pendingMeta?: unknown;
-  fulfilledMeta?: unknown;
-  rejectedMeta?: unknown;
-};
-
-export type SelectorState<TName extends string, TState> = {
-  [key in TName]: TState;
-};
-
-export type LoadableSlice<
-  TName extends string,
-  TState,
-  TArg,
-  TCaseReducers extends SliceCaseReducers<TState>
-> = EnhancedSlice<Loadable<TState>, {}, TName> & {
-  selectData: Selector<TName, Loadable<TState>, TState>;
-  actions: Slice<TState, TCaseReducers, TName>["actions"] & {
-    cancel(): AnyAction;
-    load(payload: TArg): AnyAction;
-    loaded(): AnyAction;
-    failed(): AnyAction;
-    loading(): AnyAction;
-    clearError(): AnyAction;
-  };
-};
-
-export type LoadableLoader<
-  TState,
-  TArg = void,
-  TApiConfig extends AsyncThunkConfig = {}
-> = AsyncThunkPayloadCreator<TState, TArg, TApiConfig>;
-
-export type LoadableOptions<
-  TState = any,
-  TThunkArg = void,
-  ThunkApiConfig = any,
-  TCaseReducers extends SliceCaseReducers<TState> = any
-> = AsyncThunkOptions<TThunkArg, ThunkApiConfig> & {
-  initialState?: TState;
-  reducers?: ValidateSliceCaseReducers<TState, TCaseReducers>;
-  extraReducers?:
-    | CaseReducers<NoInfer<TState>, any>
-    | ((builder: ActionReducerMapBuilder<NoInfer<TState>>) => void);
-};
-
-export type CreateLoadableSlice = {
-  /**
-   * create loadable slice without API config
-   */
-  <
-    TName extends string,
-    TState,
-    TCaseReducers extends SliceCaseReducers<TState>,
-    TArg = void
-  >(
-    name: TName,
-    loader: LoadableLoader<TState | Promise<TState>, TArg, {}>,
-    options?: LoadableOptions<TState, TArg, {}, TCaseReducers>
-  ): LoadableSlice<TName, TState, TArg, TCaseReducers>;
-
-  /**
-   * create loadable slice with API config
-   */
-  <
-    TName extends string,
-    TState,
-    TArg,
-    TCaseReducers extends SliceCaseReducers<TState>,
-    TApiConfig extends AsyncThunkConfig
-  >(
-    name: TName,
-    loader: LoadableLoader<TState | Promise<TState>, TArg, TApiConfig>,
-    options?: LoadableOptions<TState, TArg, TApiConfig, TCaseReducers>
-  ): LoadableSlice<TName, TState, TArg, TCaseReducers>;
-};
-
-export interface Loadable<T = any> {
-  loading: boolean;
-  idle: boolean;
-  loaded: boolean;
-  failed: boolean;
-  status: "idle" | "loading" | "failed" | "loaded";
-  data: T;
-  error?: any;
-}
-
-type OnReady<T> = (handler: ReadyHandler<T>) => T;
-
-interface InternalLoadable<T = any> extends Loadable<T> {
-  meta?: {
-    requestId?: any;
-    extra?: {
-      abort?: Function;
-      defer?: ReturnType<typeof createDefer>;
-    };
-  };
-}
-
 const createLoadable = <T = any>(
   status: Loadable<T>["status"],
   data: T,
@@ -613,6 +613,7 @@ const getOriginal = <T>(value: T) => {
 };
 
 const onReadyHandlersSymbol = Symbol("onReadyHandlers");
+
 function onReady(this: any, handler: Function) {
   let handlers = this[onReadyHandlersSymbol] as Function[];
   if (!handlers) {

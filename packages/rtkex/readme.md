@@ -6,8 +6,9 @@
     - [Slice selector](#slice-selector)
     - [Slice dependency logic](#slice-dependency-logic)
     - [Dynamic adding slice to the store](#dynamic-adding-slice-to-the-store)
-    - [Using slice ready event](#using-slice-ready-event)
+    - [Slice Ready Event](#slice-ready-event)
     - [Loadable slice](#loadable-slice)
+    - [High Order Reducer](#high-order-reducer)
   - [API references](#api-references)
 
 # `RTKex`
@@ -32,7 +33,7 @@ yarn add rtkex
 
 ### New store confugration method
 
-RTKex provides new configreStore(), it retrieves buildCallback.
+RTKex provides a new configreStore(), it accepts buildCallback that retrieves a builder object as its argument. The builder object provides methods for registering slice, reducer, middleware, etc.
 
 ```js
 import { configureStore } from "rtkex";
@@ -44,8 +45,7 @@ const store = configureStore((builder) =>
     .withMiddleware(middleware1, middleware2)
     .withReducer(reducer1)
     .withReducer(reducer2)
-    .withDevTools(enabled)
-    .withDevTools(devToolsOptions)
+    .withDevTools(enabled) // or .withDevTools(devToolsOptions)
     .withEnhancers(enhancer1, enhancer2)
 );
 ```
@@ -84,7 +84,7 @@ const store = configureStore((builder) => builder.withSlice(counterSlice));
 
 ### Slice selector
 
-The slice has built-in selector (slice.select() function), that uses to select the state of slice from app state tree. You also pass custom selector to select() function
+The slice has built-in selector slice.select() function, that uses to select the state of slice from app state tree. You also pass custom selector to select() function
 
 ```js
 import { useSelector } from "rtkex";
@@ -92,6 +92,7 @@ import { useSelector } from "rtkex";
 const count1 = counterSlice.select(store.getState());
 const count2 = useSelector(counterSlice);
 const count3 = useSelector(counterSlice.select);
+// using custom selector with default selector
 const doubleCount = useSelector(counterSlice.select((count) => count * 2));
 ```
 
@@ -118,15 +119,17 @@ const store = configureStore();
 import { useBuilder, useSelector } from "rtkex";
 import counterSlice from "./slices/counterSlice";
 
-function Counter() {
-  // easy ?
-  useBuilder((builder) => builder.withSlice(counterSlice));
-  // use the slice afterward
-  const count = useSelector(counterSlice);
-}
+const withCounterSlice = (builder) =>
+  function Counter() {
+    // easy ?
+    useBuilder((builder) => builder.withSlice(counterSlice));
+    // use the slice afterward
+    const count = useSelector(counterSlice);
+    return <div>{count}</div>;
+  };
 ```
 
-### Using slice ready event
+### Slice Ready Event
 
 Slice Ready Event uses to handle something whenever the slice added to the store
 
@@ -224,6 +227,17 @@ const userListSlice = createLoadableSlice(
       builder.addCase(logoutAction, (state) => []),
   }
 );
+```
+
+### High Order Reducer
+
+RTKex slice can work with HOR ease
+
+```js
+import undoable from "redux-undo";
+import { createSlice } from "rtkex";
+
+const counterSlice = createSlice().wrap(undoable);
 ```
 
 ## API references
