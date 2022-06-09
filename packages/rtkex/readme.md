@@ -43,6 +43,9 @@ const store = configureStore((builder) =>
     .withSlice(slice1)
     .withSlice(slice2)
     .withMiddleware(middleware1, middleware2)
+    .withPreMiddleware(middleware1, middleware2)
+    .withListener(actionCreator, effect)
+    .withListener({ type: "action_type" }, effect)
     .withReducer(reducer1)
     .withReducer(reducer2)
     .withDevTools(enabled) // or .withDevTools(devToolsOptions)
@@ -104,7 +107,10 @@ A slice can depend on one or many other slices. When configuring the store, you 
 import { createSlice, configureStore } from "rtkex";
 
 const slice1 = createSlice("slice1", 0, {});
-const slice2 = createSlice("slice2", 0, {}, { dependencies: [slice1] });
+const slice2 = createSlice("slice2", 0, {})
+  // add dependency slice when the store is building
+  .onBuild((builder) => builder.withSlide(slide1));
+
 // no need to add slice1
 configureStore((builder) => builder.withSlice(slice2));
 ```

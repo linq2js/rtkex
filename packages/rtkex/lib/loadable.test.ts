@@ -1,8 +1,6 @@
 import { createLoadableSlice, configureStore } from "./main";
+import { delay } from "./testUtils";
 import { expect, test } from "vitest";
-
-const delay = (ms: number = 0) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 test("loaded", async () => {
   const slice = createLoadableSlice("slice", async () => 1, {
