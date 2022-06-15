@@ -34,7 +34,7 @@ import type {
   MatchFunction,
 } from "@reduxjs/toolkit/dist/listenerMiddleware/types";
 import { NoInfer } from "@reduxjs/toolkit/dist/tsHelpers";
-import { useState } from "react";
+import { createElement, memo, useState } from "react";
 import { EqualityFn, useSelector as selectorHook, useStore } from "react-redux";
 
 export * from "@reduxjs/toolkit";
@@ -42,13 +42,24 @@ export * from "@reduxjs/toolkit";
 const onBuildCallbackSymbol = Symbol("onBuildCallback");
 const onReadyCallbackSymbol = Symbol("onReadyCallback");
 
+export type SelectableSlice<T> = { select: (state: any) => T };
+
+export type DataSelectableSlice<T> = { selectData: (state: any) => T };
+
+export type DispatchableSlice<A> = { actions: A };
+
 export type Selector<TName extends string, TState, TSelected = TState> = (
   state: SelectorState<TName, TState>
 ) => TSelected;
 
-export interface WrappedSlice<TName extends string, TState, TActions, TSelector>
-  extends SliceBase<TName, TState, TActions> {
-  selector: TSelector;
+export interface WrappedSlice<
+  TName extends string,
+  TState,
+  TActions,
+  TSelector extends Selector<any, any, TState>
+> extends SliceBase<TName, TState, TActions>,
+    SelectableSlice<TState> {
+  select: TSelector;
   reducer: Reducer<TState>;
 }
 
@@ -56,7 +67,8 @@ export interface EnhancedSlice<
   TState = any,
   TCaseReducers extends SliceCaseReducers<TState> = SliceCaseReducers<TState>,
   TName extends string = string
-> extends Slice<TState, TCaseReducers, TName> {
+> extends Slice<TState, TCaseReducers, TName>,
+    SelectableSlice<TState> {
   /**
    * a selector that returns state of slice from root state
    * @param state
@@ -220,32 +232,9 @@ export interface StoreBuilder<
 
   withErrorCallbacks(...callbacks: ErrorCallback[]): this;
 
-  withListener<T>(
-    when: T,
-    effect: /** Accepts an RTK action creator, like `incrementByAmount` */
-    T extends (...args: any[]) => any
-      ? ListenerEffect<ReturnType<T>, any, Dispatch, any>
-      : T extends { predicate: infer LP }
-      ? /** Accepts a "listener predicate" that is also a TS type predicate for the action*/
-        LP extends ListenerPredicate<AnyAction, any>
-        ? ListenerEffect<
-            ListenerPredicateGuardedActionType<LP>,
-            any,
-            Dispatch,
-            any
-          >
-        : /** Accepts a "listener predicate" that just returns a boolean, no type assertion */
-          ListenerEffect<AnyAction, any, Dispatch, any>
-      : /** Accepts an RTK matcher function, such as `incrementByAmount.match` */
-      T extends { matcher: infer M }
-      ? M extends MatchFunction<AnyAction>
-        ? ListenerEffect<GuardedType<M>, any, Dispatch, any>
-        : never
-      : /** Accepts an RTK action creator, like `incrementByAmount` */
-      T extends { type: infer TTYpe }
-      ? ListenerEffect<Action<TTYpe>, any, Dispatch, any>
-      : never
-  ): this;
+  withListeners(...listeners: Listener[]): this;
+
+  withListener: ListenerOverloads<this>;
 }
 
 export type ReadyCallback<T = any> = (api: MiddlewareAPI, context: T) => void;
@@ -366,7 +355,11 @@ export type OnBuild<TContext> = (
     TContext,
     Pick<
       StoreBuilder,
-      "withSlice" | "withReducer" | "withListener" | "withErrorCallbacks"
+      | "withSlice"
+      | "withReducer"
+      | "withListener"
+      | "withErrorCallbacks"
+      | "withListeners"
     >
   >
 ) => TContext;
@@ -387,6 +380,40 @@ interface InternalLoadable<T = any> extends Loadable<T> {
     };
   };
 }
+
+export type ListenerOverloads<R> = <T>(
+  when: T,
+  effect: /** Accepts an RTK action creator, like `incrementByAmount` */
+  T extends (...args: any[]) => any
+    ? ListenerEffect<ReturnType<T>, any, Dispatch, any>
+    : T extends { predicate: infer LP }
+    ? /** Accepts a "listener predicate" that is also a TS type predicate for the action*/
+      LP extends ListenerPredicate<AnyAction, any>
+      ? ListenerEffect<
+          ListenerPredicateGuardedActionType<LP>,
+          any,
+          Dispatch,
+          any
+        >
+      : /** Accepts a "listener predicate" that just returns a boolean, no type assertion */
+        ListenerEffect<AnyAction, any, Dispatch, any>
+    : /** Accepts an RTK matcher function, such as `incrementByAmount.match` */
+    T extends { matcher: infer M }
+    ? M extends MatchFunction<AnyAction>
+      ? ListenerEffect<GuardedType<M>, any, Dispatch, any>
+      : never
+    : /** Accepts an RTK action creator, like `incrementByAmount` */
+    T extends { type: infer TTYpe }
+    ? ListenerEffect<Action<TTYpe>, any, Dispatch, any>
+    : never
+) => R;
+
+export const createListener: ListenerOverloads<Listener> = (when, effect) => {
+  if (typeof when === "function") {
+    return { actionCreator: when, effect };
+  }
+  return { ...when, effect };
+};
 
 /**
  * combine multiple selectors/slice selectors into one selector
@@ -473,7 +500,7 @@ export const createSlice = <
         [onBuildCallbackSymbol]: (this as any)[onBuildCallbackSymbol],
         name: slice.name,
         actions: slice.actions,
-        selector: select,
+        select,
         getInitialState: () => initialState,
         reducer: highOrderReducer(this.reducer),
         onReady,
@@ -504,6 +531,7 @@ export const useSelector: UseSelector = (...args: any[]) => {
 };
 
 const createStoreBuilder = (
+  addListener: (listener: Listener) => void,
   onBuild: (data: {
     token: any;
     enhancers: StoreEnhancer[];
@@ -514,7 +542,6 @@ const createStoreBuilder = (
     preloadedState: any;
     devTools: any;
     readyHandlers: Function[];
-    listeners: Listener[];
     errorCallbacks: Callback[];
   }) => void
 ): InternalStoreBuilder<any, any> => {
@@ -529,7 +556,6 @@ const createStoreBuilder = (
   let allReadyHandlers = new Set<Function>();
   let prevToken = token;
   let builder: InternalStoreBuilder<any, any>;
-  let listeners: Listener[] = [];
   let errorCallbacks: ErrorCallback[] = [];
 
   const addSlice = (slice: SliceBase) => {
@@ -566,10 +592,8 @@ const createStoreBuilder = (
         preloadedState,
         devTools,
         readyHandlers,
-        listeners,
         errorCallbacks,
       });
-      listeners = [];
       errorCallbacks = [];
 
       return;
@@ -629,13 +653,12 @@ const createStoreBuilder = (
       }
       return this;
     },
+    withListeners(...listeners) {
+      listeners.forEach(addListener);
+      return this;
+    },
     withListener(when, effect) {
-      const listener =
-        typeof when === "function"
-          ? { actionCreator: when, effect }
-          : { ...when, effect };
-      listeners.push(listener);
-      token = {};
+      addListener(createListener(when, effect));
       return this;
     },
   };
@@ -664,6 +687,14 @@ export const configureStore = <TState, TAction extends AnyAction>(
   let onError = createCallbackGroup();
   const listenerMiddleware = createListenerMiddleware({ onError });
   const builder = createStoreBuilder(
+    (listener) => {
+      if (store) {
+        // use addListener action to start listeneing if the store is created
+        store.dispatch(addListener(listener as any) as any);
+      } else {
+        listenerMiddleware.startListening(listener as any);
+      }
+    },
     ({
       preloadedState,
       reducerMap,
@@ -673,7 +704,6 @@ export const configureStore = <TState, TAction extends AnyAction>(
       enhancers,
       devTools,
       readyHandlers,
-      listeners,
       errorCallbacks,
     }) => {
       if (Object.keys(reducerMap).length) {
@@ -688,14 +718,7 @@ export const configureStore = <TState, TAction extends AnyAction>(
       };
       if (store) {
         store.replaceReducer(reducer);
-        // add listeners
-        for (const listener of listeners) {
-          store.dispatch(addListener(listener as any) as any);
-        }
       } else {
-        for (const listener of listeners) {
-          listenerMiddleware.startListening(listener as any);
-        }
         store = configureStoreOriginal({
           preloadedState,
           reducer,
@@ -885,4 +908,60 @@ export const createLoadableSlice: CreateLoadableSlice = (
       cancel,
     },
   });
+};
+
+export type WithBuilder = {
+  /**
+   * create a component wrapper that calls buildCallbacks
+   */
+  (buildCallback: DynamicBuildCallback): <C>(component: C) => C;
+
+  /**
+   * create a component wrapper that calls buildCallbacks
+   */
+  (buildCallbacks: DynamicBuildCallback[]): <C>(component: C) => C;
+
+  /**
+   * create a component wrapper that calls buildCallbacks
+   */
+  <C>(buildCallback: DynamicBuildCallback, component: C): C;
+
+  /**
+   * create a component wrapper that calls buildCallbacks
+   */
+  <C>(buildCallbacks: DynamicBuildCallback[], component: C): C;
+};
+
+const createWithBuilderWrapper = (
+  component: any,
+  buildCallback: DynamicBuildCallback | DynamicBuildCallback[]
+) => {
+  const buildCallbacks = Array.isArray(buildCallback)
+    ? buildCallback
+    : [buildCallback];
+
+  const Wrapper = Object.assign(
+    (props: any) => {
+      useBuilder(...buildCallbacks);
+      return createElement(component, props);
+    },
+    { displayName: component.displayName || component.name }
+  );
+
+  return memo(Wrapper);
+};
+
+/**
+ * create a component wrapper that calls buildCallbacks
+ * @param buildCallbacks
+ * @param component
+ * @returns
+ */
+export const withBuilder: WithBuilder = (
+  buildCallbacks: DynamicBuildCallback | DynamicBuildCallback[],
+  component?: any
+): any => {
+  if (component) return createWithBuilderWrapper(component, buildCallbacks);
+  return (component: any) =>
+    createWithBuilderWrapper(component, buildCallbacks);
 };

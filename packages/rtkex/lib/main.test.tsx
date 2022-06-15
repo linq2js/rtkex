@@ -28,7 +28,7 @@ test("createSlice", () => {
     () => {
       const dispatch = useDispatch();
       return {
-        count: useSelector(slice.selector),
+        count: useSelector(slice.select),
         increment: () => dispatch(slice.actions.increment()),
       };
     },
