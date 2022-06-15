@@ -965,3 +965,13 @@ export const withBuilder: WithBuilder = (
   return (component: any) =>
     createWithBuilderWrapper(component, buildCallbacks);
 };
+
+/**
+ * inject slices to the component
+ * @param slices
+ * @returns
+ */
+export const withSlices =
+  (...slices: SliceBase[]): DynamicBuildCallback =>
+  (builder) =>
+    slices.forEach((slice) => builder.withSlice(slice));
