@@ -1,6 +1,6 @@
 {
   "name": "rtkex",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "A Redux Toolkit Extension",
   "author": "linq2js <linqtojs@gmail.com>",
   "repository": {
